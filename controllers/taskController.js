@@ -44,7 +44,13 @@ export const getTasksByBoard = async (req, res) => {
  */
 export const createTask = async (req, res) => {
   try {
-    const { title, description, status, board, assignedTo } = req.body;
+    // Handle both JSON and FormData
+    let { title, description, status, board, assignedTo } = req.body;
+
+    // Ensure assignedTo is an array
+    if (assignedTo && !Array.isArray(assignedTo)) {
+      assignedTo = [assignedTo];
+    }
 
     if (!board) {
       return res.status(400).json({ msg: 'Board ID is required' });
@@ -109,7 +115,13 @@ export const createTask = async (req, res) => {
  */
 export const updateTask = async (req, res) => {
   try {
-    const { title, description, status, assignedTo, board: newBoardId } = req.body;
+    // Handle both JSON and FormData
+    let { title, description, status, assignedTo, board: newBoardId } = req.body;
+
+    // Ensure assignedTo is an array if provided
+    if (assignedTo !== undefined && !Array.isArray(assignedTo)) {
+      assignedTo = assignedTo ? [assignedTo] : [];
+    }
 
     let task = await Task.findById(req.params.id).populate('board');
 

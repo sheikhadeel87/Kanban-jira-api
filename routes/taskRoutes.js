@@ -26,9 +26,20 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage });
 
+// Middleware to parse FormData arrays
+const parseFormDataArrays = (req, res, next) => {
+  if (req.body['assignedTo[]']) {
+    req.body.assignedTo = Array.isArray(req.body['assignedTo[]'])
+      ? req.body['assignedTo[]']
+      : [req.body['assignedTo[]']];
+    delete req.body['assignedTo[]'];
+  }
+  next();
+};
+
 router.get('/board/:boardId', auth, getTasksByBoard);
-router.post('/', auth, upload.single('attachment'), createTask);
-router.put('/:id', auth, upload.single('attachment'), updateTask);
+router.post('/', auth, upload.single('attachment'), parseFormDataArrays, createTask);
+router.put('/:id', auth, upload.single('attachment'), parseFormDataArrays, updateTask);
 router.patch('/:id/status', auth, updateTaskStatus);
 router.delete('/:id', auth, deleteTask);
 
