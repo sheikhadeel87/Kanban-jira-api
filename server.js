@@ -164,7 +164,8 @@ app.use('/api/users', userRoutes);
 app.use('/users', userRoutes);
 
 // Catch-all route for debugging (should be last)
-app.all('*', (req, res) => {
+// Use middleware without path pattern to catch all unmatched routes
+app.use((req, res) => {
   console.log('Catch-all route hit:', {
     method: req.method,
     path: req.path,
