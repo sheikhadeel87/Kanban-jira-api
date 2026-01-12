@@ -1,6 +1,7 @@
 import Task from '../models/task.model.js';
 import Board from '../models/board.model.js';
 import Workspace from '../models/workspace.model.js';
+import { deleteFromCloudinary } from '../config/cloudinary.js';
 
 /**
  * Get all tasks for a board (only board members can view)
@@ -96,7 +97,8 @@ export const createTask = async (req, res) => {
       board,
       assignedTo: assignedTo || [],
       createdBy: req.user.id,
-      attachment: req.file ? req.file.filename : null,
+      // Store Cloudinary URL (secure_url or path)
+      attachment: req.file ? (req.file.secure_url || req.file.path) : null,
     });
 
     const task = await newTask.save();
@@ -223,8 +225,31 @@ export const updateTask = async (req, res) => {
     if (status !== undefined) updateData.status = status;
     if (assignedTo !== undefined) updateData.assignedTo = assignedTo;
     if (newBoardId !== undefined) updateData.board = newBoardId;
+    
+    // Handle file upload/update
     if (req.file) {
-      updateData.attachment = req.file.filename;
+      // Delete old file from Cloudinary if it exists
+      if (task.attachment) {
+        try {
+          await deleteFromCloudinary(task.attachment);
+        } catch (error) {
+          console.error('Error deleting old file from Cloudinary:', error);
+          // Continue even if deletion fails
+        }
+      }
+      // Store new Cloudinary URL
+      updateData.attachment = req.file.secure_url || req.file.path;
+    } else if (req.body.attachment === null || req.body.attachment === '') {
+      // Handle explicit attachment removal
+      if (task.attachment) {
+        try {
+          await deleteFromCloudinary(task.attachment);
+        } catch (error) {
+          console.error('Error deleting file from Cloudinary:', error);
+          // Continue even if deletion fails
+        }
+      }
+      updateData.attachment = null;
     }
 
     task = await Task.findByIdAndUpdate(
@@ -332,6 +357,16 @@ export const deleteTask = async (req, res) => {
 
     if (!isAuthorized) {
       return res.status(403).json({ msg: 'Not authorized' });
+    }
+
+    // Delete attachment from Cloudinary if it exists
+    if (task.attachment) {
+      try {
+        await deleteFromCloudinary(task.attachment);
+      } catch (error) {
+        console.error('Error deleting file from Cloudinary:', error);
+        // Continue with task deletion even if file deletion fails
+      }
     }
 
     await Task.findByIdAndDelete(req.params.id);

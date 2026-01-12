@@ -1,7 +1,7 @@
 import express from 'express';
 import multerImport from 'multer';
-import path from 'path';
 import auth from '../middleware/auth.js';
+import { storage } from '../config/cloudinary.js';
 import {
   getTasksByBoard,
   createTask,
@@ -14,16 +14,7 @@ const multer = multerImport.default || multerImport; // support CJS/ESM interop
 
 const router = express.Router();
 
-// Multer config
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, 'uploads/');
-  },
-  filename: function (req, file, cb) {
-    cb(null, Date.now() + path.extname(file.originalname));
-  },
-});
-
+// Multer config with Cloudinary storage
 const upload = multer({ storage });
 
 // Middleware to parse FormData arrays

@@ -28,7 +28,7 @@ app.use(cors({
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
-// Create uploads directory if it doesn't exist
+// Create uploads directory if it doesn't exist (for backward compatibility with old files)
 const uploadsDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
@@ -40,7 +40,8 @@ app.get('/', (req, res) => {
   res.send('Server is running');
 });
 
-// Serve uploaded files statically (before API routes to avoid conflicts)
+// Serve uploaded files statically (for backward compatibility with old local files)
+// New uploads go to Cloudinary, but old files can still be served from here
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Routes
