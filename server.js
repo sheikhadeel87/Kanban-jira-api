@@ -20,20 +20,54 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
-// Middleware
+// Middleware - CORS Configuration
+const allowedOrigins = [
+  process.env.FRONTEND_URL,
+  'http://localhost:5173', // Vite default port
+  'http://localhost:3000',
+  // Allow all Vercel preview URLs (for branches)
+  /^https:\/\/trello-client.*\.vercel\.app$/,
+].filter(Boolean); // Remove undefined values
+
 app.use(cors({
-  origin: true, // Allow all origins in development
-  credentials: true
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    // Check if origin is in allowed list
+    const isAllowed = allowedOrigins.some(allowed => {
+      if (typeof allowed === 'string') {
+        return origin === allowed;
+      } else if (allowed instanceof RegExp) {
+        return allowed.test(origin);
+      }
+      return false;
+    });
+    
+    if (isAllowed) {
+      callback(null, true);
+    } else {
+      // In development, allow all origins
+      if (process.env.NODE_ENV !== 'production') {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
 // Create uploads directory if it doesn't exist (for backward compatibility with old files)
-const uploadsDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-  console.log('Created uploads directory');
-}
+// const uploadsDir = path.join(__dirname, 'uploads');
+// if (!fs.existsSync(uploadsDir)) {
+//   fs.mkdirSync(uploadsDir, { recursive: true });
+//   console.log('Created uploads directory');
+// }
 
 // Test route
 app.get('/', (req, res) => {
@@ -42,7 +76,7 @@ app.get('/', (req, res) => {
 
 // Serve uploaded files statically (for backward compatibility with old local files)
 // New uploads go to Cloudinary, but old files can still be served from here
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+// app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Routes
 app.use('/api/auth', authRoutes);
@@ -76,7 +110,28 @@ const connectDB = async () => {
 connectDB();
 
 // Start Server (ONLY ONCE)
-const PORT = process.env.PORT || 5005;
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+// const PORT = process.env.PORT || 5005;
+// app.listen(PORT, () => {
+//   console.log(`Server running on port ${PORT}`);
+// });
+
+
+//vercel deployment
+// ... existing imports and code ...
+
+// Remove or comment out the app.listen() part:
+// const PORT = process.env.PORT || 5005;
+// app.listen(PORT, () => {
+//   console.log(`Server running on port ${PORT}`);
+// });
+
+// Export app for Vercel
+export default app;
+
+// Only listen in development
+if (process.env.NODE_ENV !== 'production') {
+  const PORT = process.env.PORT || 5005;
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+  });
+}
