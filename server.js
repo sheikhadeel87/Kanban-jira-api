@@ -151,10 +151,22 @@ const connectDB = async () => {
 
 // Middleware to normalize paths (fix double /api/api issue)
 app.use((req, res, next) => {
+  // Log incoming request for debugging
+  if (process.env.NODE_ENV === 'development' || req.path.includes('debug')) {
+    console.log('Incoming request:', {
+      method: req.method,
+      path: req.path,
+      url: req.url,
+      originalUrl: req.originalUrl
+    });
+  }
+  
   // Fix double /api/api prefix that can occur with Vercel routing
-  if (req.path.startsWith('/api/api/')) {
-    req.url = req.url.replace('/api/api/', '/api/');
-    req.originalUrl = req.originalUrl.replace('/api/api/', '/api/');
+  if (req.url.startsWith('/api/api/') || req.originalUrl.startsWith('/api/api/')) {
+    req.url = req.url.replace(/^\/api\/api/, '/api');
+    req.originalUrl = req.originalUrl.replace(/^\/api\/api/, '/api');
+    // Update path as well
+    req.path = req.path.replace(/^\/api\/api/, '/api');
   }
   next();
 });
