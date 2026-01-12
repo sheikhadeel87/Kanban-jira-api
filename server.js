@@ -68,6 +68,16 @@ app.get('/', (req, res) => {
   res.send('Server is running');
 });
 
+// Debug route to check path handling
+app.get('/debug', (req, res) => {
+  res.json({
+    path: req.path,
+    url: req.url,
+    originalUrl: req.originalUrl,
+    baseUrl: req.baseUrl
+  });
+});
+
 // Serve uploaded files statically (for backward compatibility with old local files)
 // New uploads go to Cloudinary, but old files can still be served from here
 // app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
@@ -141,11 +151,17 @@ app.use(async (req, res, next) => {
 });
 
 // Routes
+// Handle both /api/* (local dev) and /* (Vercel may strip /api prefix)
 app.use('/api/auth', authRoutes);
+app.use('/auth', authRoutes);
 app.use('/api/workspaces', workspaceRoutes);
+app.use('/workspaces', workspaceRoutes);
 app.use('/api/boards', boardsRoutes);
+app.use('/boards', boardsRoutes);
 app.use('/api/tasks', taskRoutes);
+app.use('/tasks', taskRoutes);
 app.use('/api/users', userRoutes);
+app.use('/users', userRoutes);
 
 // Start Server (ONLY ONCE)
 // const PORT = process.env.PORT || 5005;
