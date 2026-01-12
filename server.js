@@ -163,6 +163,24 @@ app.use('/tasks', taskRoutes);
 app.use('/api/users', userRoutes);
 app.use('/users', userRoutes);
 
+// Catch-all route for debugging (should be last)
+app.use('*', (req, res) => {
+  console.log('Catch-all route hit:', {
+    method: req.method,
+    path: req.path,
+    url: req.url,
+    originalUrl: req.originalUrl,
+    baseUrl: req.baseUrl
+  });
+  res.status(404).json({
+    error: 'Route not found',
+    method: req.method,
+    path: req.path,
+    url: req.url,
+    originalUrl: req.originalUrl
+  });
+});
+
 // Start Server (ONLY ONCE)
 // const PORT = process.env.PORT || 5005;
 // app.listen(PORT, () => {
