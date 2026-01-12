@@ -31,9 +31,6 @@ app.use(cors({
   preflightContinue: false,
   optionsSuccessStatus: 204,
 }));
-
-// Handle preflight requests explicitly
-app.options('*', cors());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
