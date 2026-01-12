@@ -164,7 +164,7 @@ app.use('/api/users', userRoutes);
 app.use('/users', userRoutes);
 
 // Catch-all route for debugging (should be last)
-app.use('*', (req, res) => {
+app.all('*', (req, res) => {
   console.log('Catch-all route hit:', {
     method: req.method,
     path: req.path,
@@ -177,7 +177,8 @@ app.use('*', (req, res) => {
     method: req.method,
     path: req.path,
     url: req.url,
-    originalUrl: req.originalUrl
+    originalUrl: req.originalUrl,
+    message: 'This route does not exist. Check the path and method.'
   });
 });
 
