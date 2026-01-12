@@ -21,44 +21,19 @@ const __dirname = path.dirname(__filename);
 const app = express();
 
 // Middleware - CORS Configuration
-const allowedOrigins = [
-  process.env.FRONTEND_URL,
-  'http://localhost:5173', // Vite default port
-  'http://localhost:3000',
-  // Allow all Vercel preview URLs (for branches)
-  /^https:\/\/trello-client.*\.vercel\.app$/,
-].filter(Boolean); // Remove undefined values
-
+// Allow all origins (*) for now - can restrict later
 app.use(cors({
-  origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) return callback(null, true);
-    
-    // Check if origin is in allowed list
-    const isAllowed = allowedOrigins.some(allowed => {
-      if (typeof allowed === 'string') {
-        return origin === allowed;
-      } else if (allowed instanceof RegExp) {
-        return allowed.test(origin);
-      }
-      return false;
-    });
-    
-    if (isAllowed) {
-      callback(null, true);
-    } else {
-      // In development, allow all origins
-      if (process.env.NODE_ENV !== 'production') {
-        callback(null, true);
-      } else {
-        callback(new Error('Not allowed by CORS'));
-      }
-    }
-  },
+  origin: true, // Allow all origins
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  exposedHeaders: ['Content-Range', 'X-Content-Range'],
+  preflightContinue: false,
+  optionsSuccessStatus: 204,
 }));
+
+// Handle preflight requests explicitly
+app.options('*', cors());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
