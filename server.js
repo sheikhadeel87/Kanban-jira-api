@@ -72,36 +72,80 @@ app.get('/', (req, res) => {
 // New uploads go to Cloudinary, but old files can still be served from here
 // app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
+// MongoDB Connection - Serverless-safe with caching
+let cached = global.mongoose;
+
+if (!cached) {
+  cached = global.mongoose = { conn: null, promise: null };
+}
+
+const connectDB = async () => {
+  // Return cached connection if available
+  if (cached.conn) {
+    return cached.conn;
+  }
+
+  // If no connection promise exists, create one
+  if (!cached.promise) {
+    const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/Kanban-Trello';
+    
+    if (!MONGODB_URI) {
+      throw new Error('MONGODB_URI is not defined in environment variables');
+    }
+
+    const opts = {
+      bufferCommands: false, // Disable mongoose buffering for serverless
+      serverSelectionTimeoutMS: 10000, // Increase timeout for serverless
+    };
+
+    cached.promise = mongoose.connect(MONGODB_URI, opts).then((mongoose) => {
+      console.log(`MongoDB Connected: ${mongoose.connection.host}`);
+      return mongoose;
+    }).catch((err) => {
+      // Clear promise on error so we can retry
+      cached.promise = null;
+      console.error('MongoDB connection error:', err.message);
+      if (err.message.includes('IP')) {
+        console.error('\n⚠️  IP Whitelist Issue:');
+        console.error('1. Go to MongoDB Atlas → Network Access');
+        console.error('2. Click "Add IP Address"');
+        console.error('3. Add your current IP or use 0.0.0.0/0 (development only)');
+        console.error('4. Wait 1-2 minutes for changes to propagate\n');
+      }
+      throw err;
+    });
+  }
+
+  try {
+    cached.conn = await cached.promise;
+  } catch (e) {
+    cached.promise = null;
+    throw e;
+  }
+
+  return cached.conn;
+};
+
+// Middleware to ensure DB connection before handling requests (serverless-safe)
+app.use(async (req, res, next) => {
+  try {
+    await connectDB();
+    next();
+  } catch (err) {
+    console.error('Database connection failed:', err.message);
+    res.status(500).json({ 
+      msg: 'Database connection error', 
+      error: process.env.NODE_ENV === 'development' ? err.message : 'Internal server error' 
+    });
+  }
+});
+
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/workspaces', workspaceRoutes);
 app.use('/api/boards', boardsRoutes);
 app.use('/api/tasks', taskRoutes);
 app.use('/api/users', userRoutes);
-// MongoDB Connection
-const connectDB = async () => {
-  try {
-    const conn = await mongoose.connect(
-      process.env.MONGODB_URI || 'mongodb://localhost:27017/Kanban-Trello',
-      {
-        serverSelectionTimeoutMS: 5000, // Timeout after 5s instead of 30s
-      }
-    );
-    console.log(`MongoDB Connected: ${conn.connection.host}`);
-  } catch (err) {
-    console.error('MongoDB connection error:', err.message);
-    if (err.message.includes('IP')) {
-      console.error('\n⚠️  IP Whitelist Issue:');
-      console.error('1. Go to MongoDB Atlas → Network Access');
-      console.error('2. Click "Add IP Address"');
-      console.error('3. Add your current IP or use 0.0.0.0/0 (development only)');
-      console.error('4. Wait 1-2 minutes for changes to propagate\n');
-    }
-    process.exit(1);
-  }
-};
-
-connectDB();
 
 // Start Server (ONLY ONCE)
 // const PORT = process.env.PORT || 5005;
@@ -125,6 +169,12 @@ export default app;
 // Only listen in development
 if (process.env.NODE_ENV !== 'production') {
   const PORT = process.env.PORT || 5005;
+  
+  // Optional: Eagerly connect in development for better DX (non-blocking)
+  connectDB().catch((err) => {
+    console.warn('⚠️  Could not connect to MongoDB on startup (will retry on first request):', err.message);
+  });
+  
   app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
   });
