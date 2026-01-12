@@ -27,6 +27,7 @@ const allowedOrigins = [
   'http://localhost:3001'
 ];
 
+// CORS configuration - must be before other middleware
 app.use(cors({
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps, Postman, or same-origin requests)
@@ -44,11 +45,14 @@ app.use(cors({
       return callback(null, true);
     }
     
+    // Log blocked origin for debugging
+    console.log('CORS blocked origin:', origin);
     callback(new Error('Not allowed by CORS'));
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  exposedHeaders: ['Content-Type', 'Authorization'],
   preflightContinue: false,
   optionsSuccessStatus: 204
 }));
@@ -75,6 +79,15 @@ app.get('/debug', (req, res) => {
     url: req.url,
     originalUrl: req.originalUrl,
     baseUrl: req.baseUrl
+  });
+});
+
+// CORS test route
+app.get('/api/cors-test', (req, res) => {
+  res.json({
+    message: 'CORS is working',
+    origin: req.headers.origin,
+    headers: req.headers
   });
 });
 
