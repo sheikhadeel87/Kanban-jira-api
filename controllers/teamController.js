@@ -1,5 +1,6 @@
 import Team from "../models/team.model.js";
 import Board from "../models/board.model.js";
+import User from "../models/user.model.js";
 
 /**
  * Create team for a board (called once)
@@ -124,5 +125,79 @@ export const deleteMember = async (req, res) => {
   } catch (err) {
     console.error(err.message);
     res.status(500).send("Server error");
+  }
+};
+
+/**
+ * Get team members for current user
+ * Returns only members where current user is the inviter (inviting_id = current user)
+ * Uses the new Team model structure with inviting_id and member_id
+ */
+export const getMyTeamMembers = async (req, res) => {
+  try {
+    console.log('📥 getMyTeamMembers endpoint called');
+    console.log('Request path:', req.path);
+    console.log('Request method:', req.method);
+    
+    // Get current user ID
+    if (!req.user || !req.user._id) {
+      console.log('❌ No user found in request');
+      return res.status(401).json({ msg: 'Unauthorized' });
+    }
+    
+    const currentUserId = req.user._id;
+    const currentUserIdStr = currentUserId.toString();
+    console.log(`🔍 Getting team members for user ID: ${currentUserIdStr} from Team table`);
+
+    // Query Team table - only records where inviting_id matches current user
+    // IMPORTANT: Only show 'accepted' members - no one joins without email acceptance
+    const teamRecords = await Team.find({
+      inviting_id: currentUserId, // CRITICAL: Only records where current user is the inviter
+      member_id: { $ne: null }, // Only show members who have registered
+      status: 'accepted', // ONLY accepted members - requires email acceptance
+    })
+    .populate('member_id', 'name email role _id') // Join with User table
+    .populate('inviting_id', 'name email'); // Join with User table for verification
+    
+    console.log(`📊 Found ${teamRecords.length} team records for inviting_id: ${currentUserIdStr}`);
+    
+    // If no team records found, return empty array
+    if (!teamRecords || teamRecords.length === 0) {
+      console.log(`✅ No team members found for user ${currentUserIdStr}`);
+      return res.status(200).json([]);
+    }
+    
+    // Extract users from team records (from Team table via populate)
+    const users = teamRecords
+      .filter(team => {
+        if (!team.member_id || !team.member_id._id) return false;
+        
+        // Verify inviting_id matches current user (safety check)
+        const teamInvitingId = team.inviting_id?._id?.toString() || team.inviting_id?.toString();
+        const matches = teamInvitingId === currentUserIdStr;
+        
+        if (!matches) {
+          console.error(`❌ SECURITY: Filtering out record - inviting_id ${teamInvitingId} != ${currentUserIdStr}`);
+        }
+        
+        return matches;
+      })
+      .map(team => ({
+        _id: team.member_id._id,
+        name: team.member_id.name,
+        email: team.member_id.email,
+        role: team.member_id.role,
+        invitedAt: team.invitedAt,
+        acceptedAt: team.acceptedAt,
+        status: team.status,
+      }));
+    
+    console.log(`✅ Returning ${users.length} team members for user ${currentUserIdStr} from Team table`);
+    
+    // Return users from Team table (ONLY those where inviting_id = current user)
+    return res.status(200).json(users);
+  } catch (err) {
+    console.error('Error in getMyTeamMembers:', err);
+    res.status(500).json({ msg: 'Server error' });
   }
 };

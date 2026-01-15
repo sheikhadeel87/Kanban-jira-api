@@ -12,6 +12,7 @@ import workspaceRoutes from './routes/workspaceRoutes.js';
 import boardsRoutes from './routes/boardsRoutes.js';
 import taskRoutes from './routes/taskRoutes.js';
 import userRoutes from './routes/userRoutes.js';
+import teamRoutes from './routes/teamRoutes.js';
 
 dotenv.config();
 
@@ -152,13 +153,13 @@ const connectDB = async () => {
 // Middleware to normalize paths (fix double /api/api issue from Vercel rewrites)
 app.use((req, res, next) => {
   // Log incoming request for debugging (always log in production to debug routing)
-  console.log('Incoming request:', {
-    method: req.method,
-    path: req.path,
-    url: req.url,
-    originalUrl: req.originalUrl,
-    baseUrl: req.baseUrl
-  });
+  // console.log('Incoming request:', {
+  //   method: req.method,
+  //   path: req.path,
+  //   url: req.url,
+  //   originalUrl: req.originalUrl,
+  //   baseUrl: req.baseUrl
+  // });
   
   // Fix double /api/api prefix that occurs when Vercel rewrites /api/* to /api
   // When request is /api/auth/login, Vercel rewrites to /api, but Express receives /api/api/auth/login
@@ -202,6 +203,13 @@ app.use('/api/tasks', taskRoutes);
 app.use('/tasks', taskRoutes);
 app.use('/api/users', userRoutes);
 app.use('/users', userRoutes);
+// Debug middleware before routes
+app.use('/api/teams', (req, res, next) => {
+  console.log(`🔍 Teams API request: ${req.method} ${req.originalUrl} -> ${req.path}`);
+  next();
+});
+app.use('/api/teams', teamRoutes);
+app.use('/teams', teamRoutes);
 
 // Catch-all route for debugging (should be last)
 // Use middleware without path pattern to catch all unmatched routes

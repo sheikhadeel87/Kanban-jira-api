@@ -26,6 +26,28 @@ export const register = async (req, res) => {
 
     await user.save();
 
+    // Link user to Team table invitations
+    // Set member_id for ALL invitations with this email (both 'invited' and 'accepted')
+    try {
+      const Team = (await import('../models/team.model.js')).default;
+      
+      // Update all pending and accepted invitations with this email to set member_id
+      const updateResult = await Team.updateMany(
+        { 
+          invitedEmail: email.toLowerCase().trim(),
+          member_id: null, // Only update records where member_id is not set
+        },
+        { 
+          member_id: user._id,
+        }
+      );
+      
+      console.log(`✅ Linked ${updateResult.modifiedCount} invitation(s) to registered user: ${email}, member_id set to ${user._id}`);
+    } catch (inviteErr) {
+      // Don't fail registration if invitation linking fails
+      console.error('Error linking invitation to Team table:', inviteErr);
+    }
+
     const payload = {
       user: {
         id: user.id,
@@ -68,6 +90,30 @@ export const login = async (req, res) => {
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       return res.status(400).json({ msg: 'Invalid credentials' });
+    }
+
+    // Link user to any accepted Team invitations where member_id is null
+    try {
+      const Team = (await import('../models/team.model.js')).default;
+      
+      // Update accepted invitations with this email to set member_id
+      const updateResult = await Team.updateMany(
+        { 
+          invitedEmail: email.toLowerCase().trim(),
+          member_id: null, // Only update records where member_id is not set
+          status: 'accepted', // Only link accepted invitations
+        },
+        { 
+          member_id: user._id,
+        }
+      );
+      
+      if (updateResult.modifiedCount > 0) {
+        console.log(`✅ Linked ${updateResult.modifiedCount} accepted invitation(s) to logged-in user: ${email}`);
+      }
+    } catch (inviteErr) {
+      // Don't fail login if invitation linking fails
+      console.error('Error linking invitation on login:', inviteErr);
     }
 
     const payload = {

@@ -7,6 +7,7 @@ import {
   createBoard,
   updateBoard,
   deleteBoard,
+  sendBoardInvite,
 } from '../controllers/boardController.js';
 
 const router = express.Router();
@@ -19,6 +20,8 @@ router.get('/:id', auth, getBoardById);
 router.post('/', auth, createBoard);
 router.put('/:id', auth, updateBoard);
 router.delete('/:id', auth, deleteBoard);
+// Send board invitation via email
+router.post('/:boardId/invite', auth, sendBoardInvite);
 
 export default router;
 
