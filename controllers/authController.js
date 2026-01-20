@@ -8,7 +8,27 @@ dotenv.config();
 
 export const register = async (req, res) => {
   try {
+    // Check if req.body exists
+    if (!req.body) {
+      console.error('Registration error: req.body is undefined', {
+        method: req.method,
+        url: req.url,
+        headers: req.headers,
+        contentType: req.headers['content-type']
+      });
+      return res.status(400).json({ 
+        msg: 'Invalid request: request body is missing. Please ensure Content-Type is application/json.' 
+      });
+    }
+
     const { name, email, password, invitationToken, organizationName } = req.body;
+
+    // Validate required fields
+    if (!name || !email || !password) {
+      return res.status(400).json({ 
+        msg: 'Name, email, and password are required' 
+      });
+    }
 
     let organizationId = null;
     let userRole = 'member';
@@ -118,7 +138,27 @@ export const register = async (req, res) => {
 
 export const login = async (req, res) => {
   try {
+    // Check if req.body exists
+    if (!req.body) {
+      console.error('Login error: req.body is undefined', {
+        method: req.method,
+        url: req.url,
+        headers: req.headers,
+        contentType: req.headers['content-type']
+      });
+      return res.status(400).json({ 
+        msg: 'Invalid request: request body is missing. Please ensure Content-Type is application/json.' 
+      });
+    }
+
     const { email, password } = req.body;
+
+    // Validate required fields
+    if (!email || !password) {
+      return res.status(400).json({ 
+        msg: 'Email and password are required' 
+      });
+    }
 
     // Note: Since email is not unique globally, we might need organization context
     // For now, find first user with this email (in production, you might want to add org selection)

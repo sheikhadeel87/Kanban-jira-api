@@ -382,11 +382,15 @@ export const updateTaskStatus = async (req, res) => {
  */
 export const deleteTask = async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).populate('organization');
+    const user = await User.findById(req.user.id);
     const task = await Task.findById(req.params.id).populate('board');
 
     if (!task) {
       return res.status(404).json({ msg: 'Task not found' });
+    }
+
+    if (!user || !user.organization) {
+      return res.status(404).json({ msg: 'User does not belong to an organization' });
     }
 
     // Check project membership
@@ -400,19 +404,34 @@ export const deleteTask = async (req, res) => {
       return res.status(404).json({ msg: 'Project not found' });
     }
 
-    if (!user.organization) {
-      return res.status(404).json({ msg: 'User does not belong to an organization' });
+    // Get organization ID (handle both populated and non-populated cases)
+    const organizationId = user.organization._id || user.organization;
+    const organization = await Organization.findById(organizationId).populate('owner', '_id');
+    
+    if (!organization) {
+      return res.status(404).json({ msg: 'Organization not found' });
     }
 
-    const organization = await Organization.findById(user.organization);
-
     // Check user belongs to same organization
-    if (project.organization.toString() !== user.organization.toString()) {
+    const projectOrgId = project.organization._id || project.organization;
+    if (projectOrgId.toString() !== organizationId.toString()) {
       return res.status(403).json({ msg: 'Access denied' });
     }
 
     // Check permissions: only admin/owner can delete
-    if (!canDeleteTask(user, organization)) {
+    const canDelete = canDeleteTask(user, organization);
+    console.log('Checking task deletion permissions:', {
+      userId: user._id.toString(),
+      userRole: user.role,
+      orgOwner: organization.owner?._id?.toString() || organization.owner?.toString(),
+      isOwner: organization.owner && (
+        (organization.owner._id?.toString() === user._id.toString()) ||
+        (organization.owner.toString() === user._id.toString())
+      ),
+      canDelete: canDelete
+    });
+    
+    if (!canDelete) {
       return res.status(403).json({ msg: 'Only admin/owner can delete tasks' });
     }
 

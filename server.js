@@ -59,8 +59,25 @@ app.use(cors({
   optionsSuccessStatus: 204
 }));
 
-app.use(express.urlencoded({ extended: true }));
-app.use(express.json());
+// Body parsing middleware - must come before routes
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(express.json({ limit: '10mb' }));
+
+// Debug middleware to log request body (only in development)
+if (process.env.NODE_ENV !== 'production') {
+  app.use((req, res, next) => {
+    if (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH') {
+      console.log('Request body received:', {
+        method: req.method,
+        path: req.path,
+        contentType: req.headers['content-type'],
+        hasBody: !!req.body,
+        bodyKeys: req.body ? Object.keys(req.body) : []
+      });
+    }
+    next();
+  });
+}
 
 // Create uploads directory if it doesn't exist (for backward compatibility with old files)
 // const uploadsDir = path.join(__dirname, 'uploads');
