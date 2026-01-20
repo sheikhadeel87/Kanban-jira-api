@@ -10,8 +10,8 @@ const createTransporter = () => {
   return nodemailer.createTransport({
     service: process.env.EMAIL_SERVICE || 'gmail',
     auth: {
-      user:'ahmed@audienta.ai',
-      pass: 'gmnq stzx lyxe nrxn', // Use app password for Gmail
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASSWORD,
     },
     // For other SMTP services, use:
     // host: process.env.SMTP_HOST,
@@ -342,3 +342,144 @@ You may ignore this email if you do not want to join the team. This invitation w
   }
 };
 
+/**
+ * Send organization invitation email
+ * @param {string} toEmail - Email address to send invitation to
+ * @param {string} inviterName - Name of the person sending the invitation
+ * @param {string} organizationName - Name of the organization
+ * @param {string} invitationToken - Invitation token for registration
+ */
+export const sendOrganizationInvitation = async (toEmail, inviterName, organizationName, invitationToken) => {
+  try {
+    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
+      console.warn('Email service not configured. Skipping email send.');
+      return { success: false, message: 'Email service not configured' };
+    }
+
+    const transporter = createTransporter();
+    
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const registerUrl = `${frontendUrl}/register?inviteToken=${invitationToken}&email=${encodeURIComponent(toEmail)}`;
+    const loginUrl = `${frontendUrl}/login?inviteToken=${invitationToken}&email=${encodeURIComponent(toEmail)}`;
+
+    const mailOptions = {
+      from: `"Kanban Board" <${process.env.EMAIL_USER}>`,
+      to: toEmail,
+      subject: `You're invited to join ${organizationName} on Kanban Board`,
+      html: `
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Organization Invitation</title>
+        </head>
+        <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f3f4f6;">
+          <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color: #f3f4f6;">
+            <tr>
+              <td style="padding: 40px 20px;">
+                <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="max-width: 600px; margin: 0 auto;">
+                  
+                  <!-- Header -->
+                  <tr>
+                    <td style="background: linear-gradient(135deg, #1e293b 0%, #334155 100%); padding: 32px 40px; text-align: center; border-radius: 12px 12px 0 0;">
+                      <div style="display: inline-block; background-color: #3b82f6; padding: 12px 16px; border-radius: 10px;">
+                        <span style="font-size: 24px; font-weight: 700; color: #ffffff; letter-spacing: -0.5px;">📋 Kanban</span>
+                      </div>
+                    </td>
+                  </tr>
+                  
+                  <!-- Main Content -->
+                  <tr>
+                    <td style="background-color: #ffffff; padding: 48px 40px;">
+                      <h1 style="margin: 0 0 8px 0; font-size: 28px; font-weight: 700; color: #1e293b;">
+                        Organization Invitation
+                      </h1>
+                      <h2 style="margin: 0 0 32px 0; font-size: 20px; font-weight: 600; color: #475569;">
+                        You've been invited to join ${organizationName}
+                      </h2>
+                      
+                      <p style="margin: 0 0 24px 0; font-size: 16px; color: #334155; line-height: 1.6;">
+                        <strong style="color: #1e293b;">${inviterName}</strong> has invited you to join the organization 
+                        <strong style="color: #1e293b;">${organizationName}</strong> on Kanban Board.
+                      </p>
+                      
+                      <p style="margin: 0 0 32px 0; font-size: 16px; color: #334155; line-height: 1.6;">
+                        Click the button below to accept the invitation and create your account:
+                      </p>
+                      
+                      <div style="text-align: center; margin: 32px 0;">
+                        <a href="${registerUrl}" 
+                           style="display: inline-block; 
+                                  background-color: #f97316; 
+                                  color: #ffffff; 
+                                  font-size: 16px; 
+                                  font-weight: 600; 
+                                  text-decoration: none; 
+                                  padding: 16px 48px; 
+                                  border-radius: 8px;
+                                  box-shadow: 0 4px 14px rgba(249, 115, 22, 0.4);">
+                          Accept Invitation
+                        </a>
+                      </div>
+                      
+                      <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 32px 0;">
+                      
+                      <p style="margin: 0 0 4px 0; font-size: 16px; color: #334155;">Thanks,</p>
+                      <p style="margin: 0; font-size: 16px; font-weight: 600; color: #1e293b;">The Kanban Board team</p>
+                    </td>
+                  </tr>
+                  
+                  <!-- Footer -->
+                  <tr>
+                    <td style="background-color: #f8fafc; padding: 32px 40px; border-radius: 0 0 12px 12px; border-top: 1px solid #e2e8f0;">
+                      <p style="margin: 0 0 20px 0; font-size: 13px; color: #64748b; line-height: 1.6;">
+                        You can also copy and paste this link into your browser:
+                      </p>
+                      <p style="margin: 8px 0 20px 0; font-size: 12px; word-break: break-all;">
+                        <a href="${registerUrl}" style="color: #3b82f6; text-decoration: none;">${registerUrl}</a>
+                      </p>
+                      <p style="margin: 0 0 20px 0; font-size: 13px; color: #94a3b8; line-height: 1.5;">
+                        You may ignore this email if you do not want to join the organization. This invitation will expire in 7 days.
+                      </p>
+                      <p style="margin: 0; font-size: 12px; color: #94a3b8; text-align: center;">
+                        © ${new Date().getFullYear()} Kanban Board. All rights reserved.
+                      </p>
+                    </td>
+                  </tr>
+                  
+                </table>
+              </td>
+            </tr>
+          </table>
+        </body>
+        </html>
+      `,
+      text: `
+Organization Invitation
+
+You've been invited to join ${organizationName}
+
+${inviterName} has invited you to join the organization ${organizationName} on Kanban Board.
+
+Click the link below to accept the invitation and create your account:
+${registerUrl}
+
+Thanks,
+The Kanban Board team
+
+---
+You may ignore this email if you do not want to join the organization. This invitation will expire in 7 days.
+
+© ${new Date().getFullYear()} Kanban Board. All rights reserved.
+      `,
+    };
+
+    const info = await transporter.sendMail(mailOptions);
+    console.log('Organization invitation email sent successfully:', info.messageId);
+    return { success: true, messageId: info.messageId };
+  } catch (error) {
+    console.error('Error sending organization invitation email:', error);
+    return { success: false, error: error.message };
+  }
+};

@@ -10,9 +10,9 @@ const boardSchema = new mongoose.Schema(
     description: {
       type: String,
     },
-    workspace: {
+    project: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'Workspace',
+      ref: 'Project',
       required: true,
     },
     owner: {
@@ -33,7 +33,7 @@ const boardSchema = new mongoose.Schema(
 );
 
 // Index for faster queries
-boardSchema.index({ workspace: 1 });
+boardSchema.index({ project: 1 });
 boardSchema.index({ owner: 1 });
 boardSchema.index({ members: 1 });
 

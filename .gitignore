@@ -25,7 +25,16 @@ Thumbs.db
 
 # VS Code
 .vscode/
-package-lock.json
+
+# IDE
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+logs/
+*.log
 
 # Uploads folder - keep folder, ignore files
 backend/uploads/*

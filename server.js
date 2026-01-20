@@ -8,7 +8,8 @@ import fs from 'fs';
 
 // Routes
 import authRoutes from './routes/authRoutes.js';
-import workspaceRoutes from './routes/workspaceRoutes.js';
+import organizationRoutes from './routes/organizationRoutes.js';
+import projectRoutes from './routes/projectRoutes.js';
 import boardsRoutes from './routes/boardsRoutes.js';
 import taskRoutes from './routes/taskRoutes.js';
 import userRoutes from './routes/userRoutes.js';
@@ -73,24 +74,7 @@ app.get('/', (req, res) => {
   res.send('Server is running');
 });
 
-// Debug route to check path handling
-app.get('/debug', (req, res) => {
-  res.json({
-    path: req.path,
-    url: req.url,
-    originalUrl: req.originalUrl,
-    baseUrl: req.baseUrl
-  });
-});
-
-// CORS test route
-app.get('/api/cors-test', (req, res) => {
-  res.json({
-    message: 'CORS is working',
-    origin: req.headers.origin,
-    headers: req.headers
-  });
-});
+// Debug routes removed for production
 
 // Serve uploaded files statically (for backward compatibility with old local files)
 // New uploads go to Cloudinary, but old files can still be served from here
@@ -195,8 +179,10 @@ app.use(async (req, res, next) => {
 // Handle both /api/* (local dev) and /* (Vercel may strip /api prefix)
 app.use('/api/auth', authRoutes);
 app.use('/auth', authRoutes);
-app.use('/api/workspaces', workspaceRoutes);
-app.use('/workspaces', workspaceRoutes);
+app.use('/api/organizations', organizationRoutes);
+app.use('/organizations', organizationRoutes);
+app.use('/api/projects', projectRoutes);
+app.use('/projects', projectRoutes);
 app.use('/api/boards', boardsRoutes);
 app.use('/boards', boardsRoutes);
 app.use('/api/tasks', taskRoutes);

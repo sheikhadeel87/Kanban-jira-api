@@ -8,23 +8,32 @@ const userSchema = new mongoose.Schema({
     email: {
         type: String,
         required: true,
-        unique: true,
+        // Removed unique: true - same email can exist in multiple orgs
     },
     password: {
         type: String,
         required: true,
         minlength: 6,
     },
+    organization: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Organization',
+        required: true,
+    },
     role: {
         type: String,
-        enum: ['user', 'admin'],
-        default: 'user',
+        enum: ['owner', 'admin', 'member'],
+        default: 'member',
     }
     
 },{
         timestamps: true,
     }
 );
+
+// Email must be unique per organization
+userSchema.index({ email: 1, organization: 1 }, { unique: true });
+
 const User = mongoose.model('User', userSchema);
 export default User;
 

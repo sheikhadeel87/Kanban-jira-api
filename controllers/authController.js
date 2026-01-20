@@ -2,56 +2,93 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import dotenv from 'dotenv';
 import User from '../models/user.model.js';
+import Organization from '../models/organization.model.js';
 
 dotenv.config();
 
 export const register = async (req, res) => {
   try {
-    const { name, email, password, role } = req.body;
+    const { name, email, password, invitationToken, organizationName } = req.body;
 
-    let user = await User.findOne({ email });
+    let organizationId = null;
+    let userRole = 'member';
+
+    // If invitation token provided, validate and get organization
+    if (invitationToken) {
+      const OrganizationInvitation = (await import('../models/organizationInvitation.model.js')).default;
+      const invitation = await OrganizationInvitation.findOne({
+        invitationToken,
+        status: 'invited',
+        tokenExpiresAt: { $gt: new Date() },
+      });
+
+      if (!invitation) {
+        return res.status(400).json({ msg: 'Invalid or expired invitation' });
+      }
+
+      organizationId = invitation.organization;
+      // Role determined by invitation or defaults to member
+    } else if (organizationName) {
+      // First user creates organization
+      const organization = new Organization({
+        name: organizationName,
+        description: '',
+        owner: null, // Will be set after user creation
+      });
+      await organization.save();
+      organizationId = organization._id;
+      userRole = 'owner'; // First user becomes owner
+    } else {
+      return res.status(400).json({ 
+        msg: 'Organization invitation token or organization name required' 
+      });
+    }
+
+    // Check if user already exists in this organization
+    let user = await User.findOne({ 
+      email: email.toLowerCase(),
+      organization: organizationId 
+    });
+
     if (user) {
-      return res.status(400).json({ msg: 'User already exists' });
+      return res.status(400).json({ msg: 'User already exists in this organization' });
     }
 
     user = new User({
       name,
-      email,
+      email: email.toLowerCase(),
       password,
-      role: role || 'user',
+      organization: organizationId,
+      role: userRole,
     });
 
     const salt = await bcrypt.genSalt(10);
     user.password = await bcrypt.hash(password, salt);
-
     await user.save();
 
-    // Link user to Team table invitations
-    // Set member_id for ALL invitations with this email (both 'invited' and 'accepted')
-    try {
-      const Team = (await import('../models/team.model.js')).default;
-      
-      // Update all pending and accepted invitations with this email to set member_id
-      const updateResult = await Team.updateMany(
+    // If creating new organization, set user as owner
+    if (userRole === 'owner') {
+      await Organization.findByIdAndUpdate(organizationId, { owner: user._id });
+    }
+
+    // Update invitation if token was provided
+    if (invitationToken) {
+      const OrganizationInvitation = (await import('../models/organizationInvitation.model.js')).default;
+      await OrganizationInvitation.findOneAndUpdate(
+        { invitationToken },
         { 
-          invitedEmail: email.toLowerCase().trim(),
-          member_id: null, // Only update records where member_id is not set
-        },
-        { 
-          member_id: user._id,
+          memberId: user._id,
+          status: 'accepted',
+          acceptedAt: new Date(),
         }
       );
-      
-      console.log(`✅ Linked ${updateResult.modifiedCount} invitation(s) to registered user: ${email}, member_id set to ${user._id}`);
-    } catch (inviteErr) {
-      // Don't fail registration if invitation linking fails
-      console.error('Error linking invitation to Team table:', inviteErr);
     }
 
     const payload = {
       user: {
         id: user.id,
         role: user.role,
+        organization: user.organization,
       },
     };
 
@@ -68,13 +105,14 @@ export const register = async (req, res) => {
             name: user.name,
             email: user.email,
             role: user.role,
+            organization: user.organization,
           },
         });
       }
     );
   } catch (err) {
-    console.error(err.message);
-    res.status(500).send('Server error');
+    console.error('Registration error:', err);
+    res.status(500).json({ msg: 'Server error', error: err.message });
   }
 };
 
@@ -82,7 +120,9 @@ export const login = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    let user = await User.findOne({ email });
+    // Note: Since email is not unique globally, we might need organization context
+    // For now, find first user with this email (in production, you might want to add org selection)
+    let user = await User.findOne({ email: email.toLowerCase() });
     if (!user) {
       return res.status(400).json({ msg: 'Invalid credentials' });
     }
@@ -92,34 +132,11 @@ export const login = async (req, res) => {
       return res.status(400).json({ msg: 'Invalid credentials' });
     }
 
-    // Link user to any accepted Team invitations where member_id is null
-    try {
-      const Team = (await import('../models/team.model.js')).default;
-      
-      // Update accepted invitations with this email to set member_id
-      const updateResult = await Team.updateMany(
-        { 
-          invitedEmail: email.toLowerCase().trim(),
-          member_id: null, // Only update records where member_id is not set
-          status: 'accepted', // Only link accepted invitations
-        },
-        { 
-          member_id: user._id,
-        }
-      );
-      
-      if (updateResult.modifiedCount > 0) {
-        console.log(`✅ Linked ${updateResult.modifiedCount} accepted invitation(s) to logged-in user: ${email}`);
-      }
-    } catch (inviteErr) {
-      // Don't fail login if invitation linking fails
-      console.error('Error linking invitation on login:', inviteErr);
-    }
-
     const payload = {
       user: {
         id: user.id,
         role: user.role,
+        organization: user.organization,
       },
     };
 
@@ -136,13 +153,14 @@ export const login = async (req, res) => {
             name: user.name,
             email: user.email,
             role: user.role,
+            organization: user.organization,
           },
         });
       }
     );
   } catch (err) {
     console.error(err.message);
-    res.status(500).send('Server error', err.message);
+    res.status(500).json({ msg: 'Server error' });
   }
 };
 

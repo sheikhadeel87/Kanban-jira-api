@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 
-const workspaceSchema = new mongoose.Schema(
+const projectSchema = new mongoose.Schema(
   {
     name: {
       type: String,
@@ -9,6 +9,11 @@ const workspaceSchema = new mongoose.Schema(
     },
     description: {
       type: String,
+    },
+    organization: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Organization',
+      required: true,
     },
     members: [
       {
@@ -36,9 +41,9 @@ const workspaceSchema = new mongoose.Schema(
 );
 
 // Index for faster queries
-workspaceSchema.index({ 'members.user': 1 });
-workspaceSchema.index({ createdBy: 1 });
+projectSchema.index({ organization: 1 });
+projectSchema.index({ 'members.user': 1 });
+projectSchema.index({ createdBy: 1 });
 
-const Workspace = mongoose.model('Workspace', workspaceSchema);
-export default Workspace;
-
+const Project = mongoose.model('Project', projectSchema);
+export default Project;

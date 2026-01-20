@@ -36,18 +36,6 @@ export const getAllUsers = async (req, res) => {
     
     console.log(`📊 Query result: Found ${teamRecords.length} team records where inviting_id = ${currentUserIdStr}`);
     
-    // Debug: Verify each record's inviting_id matches (double-check database query worked)
-    teamRecords.forEach((record, index) => {
-      const recordInvitingId = record.inviting_id?._id?.toString() || record.inviting_id?.toString() || 'unknown';
-      const recordMemberId = record.member_id?._id?.toString() || record.member_id?.toString() || 'unknown';
-      const matches = recordInvitingId === currentUserIdStr;
-      
-      console.log(`  Record ${index + 1}: inviting_id=${recordInvitingId}, member_id=${recordMemberId}, matches=${matches}`);
-      
-      if (!matches) {
-        console.error(`  ❌ MISMATCH: Record ${record._id} has inviting_id ${recordInvitingId} but current user is ${currentUserIdStr}`);
-      }
-    });
     
     // If no team records found for this user, return empty array
     if (!teamRecords || teamRecords.length === 0) {
@@ -220,21 +208,22 @@ export const deleteUserById = async (req, res) => {
       return res.status(403).json({ msg: 'Access denied. User not found.' });
     }
 
-    // Check if user is admin OR workspace creator
+    // Check if user is admin OR owner OR project creator
     const isAdmin = currentUser.role === 'admin';
+    const isOwner = currentUser.role === 'owner';
     
-    // If not admin, check if user is a workspace creator
-    let isWorkspaceCreator = false;
-    if (!isAdmin) {
-      const Workspace = (await import('../models/workspace.model.js')).default;
-      const workspaces = await Workspace.find({ createdBy: req.user.id });
-      isWorkspaceCreator = workspaces.length > 0;
+    // If not admin/owner, check if user is a project creator
+    let isProjectCreator = false;
+    if (!isAdmin && !isOwner) {
+      const Project = (await import('../models/project.model.js')).default;
+      const projects = await Project.find({ createdBy: req.user.id });
+      isProjectCreator = projects.length > 0;
     }
 
-    // Only allow delete if user is admin OR workspace creator
-    if (!isAdmin && !isWorkspaceCreator) {
+    // Only allow delete if user is admin/owner OR project creator
+    if (!isAdmin && !isOwner && !isProjectCreator) {
       return res.status(403).json({ 
-        msg: 'Access denied. Only workspace creators can delete users.' 
+        msg: 'Access denied. Only admins, owners, or project creators can delete users.' 
       });
     }
 

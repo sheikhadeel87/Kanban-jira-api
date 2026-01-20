@@ -1,6 +1,9 @@
 import Task from '../models/task.model.js';
 import Board from '../models/board.model.js';
-import Workspace from '../models/workspace.model.js';
+import Project from '../models/project.model.js';
+import Organization from '../models/organization.model.js';
+import User from '../models/user.model.js';
+import { canCreateTask, canUpdateTask, canDeleteTask, isMember } from '../utils/permissions.js';
 import { deleteFromCloudinary } from '../config/cloudinary.js';
 
 /**
@@ -8,23 +11,29 @@ import { deleteFromCloudinary } from '../config/cloudinary.js';
  */
 export const getTasksByBoard = async (req, res) => {
   try {
-    const board = await Board.findById(req.params.boardId).populate('workspace');
+    const user = await User.findById(req.user.id);
+    const board = await Board.findById(req.params.boardId).populate('project');
 
     if (!board) {
       return res.status(404).json({ msg: 'Board not found' });
     }
 
-    // Check if user is workspace member
-    const workspace = await Workspace.findById(board.workspace._id || board.workspace);
-    if (!workspace) {
-      return res.status(404).json({ msg: 'Workspace not found' });
+    // Check if user is project member
+    const project = await Project.findById(board.project._id || board.project);
+    if (!project) {
+      return res.status(404).json({ msg: 'Project not found' });
     }
 
-    const isWorkspaceMember = workspace.members.some(
-      (m) => m.user.toString() === req.user.id
+    // Check user belongs to same organization
+    if (project.organization.toString() !== user.organization.toString()) {
+      return res.status(403).json({ msg: 'Access denied' });
+    }
+
+    const isProjectMember = project.members.some(
+      (m) => (m.user._id || m.user).toString() === req.user.id
     );
 
-    if (!isWorkspaceMember && req.user.role !== 'admin') {
+    if (!isProjectMember && user.role !== 'owner' && user.role !== 'admin') {
       return res.status(403).json({ msg: 'Access denied' });
     }
 
@@ -36,7 +45,7 @@ export const getTasksByBoard = async (req, res) => {
     res.json(tasks);
   } catch (err) {
     console.error(err.message);
-    res.status(500).send('Server error');
+    res.status(500).json({ msg: 'Server error' });
   }
 };
 
@@ -57,35 +66,61 @@ export const createTask = async (req, res) => {
       return res.status(400).json({ msg: 'Board ID is required' });
     }
 
-    // Check if user is workspace member
-    const boardDoc = await Board.findById(board).populate('workspace');
+    const user = await User.findById(req.user.id);
+    
+    if (!user || !user.organization) {
+      return res.status(404).json({ msg: 'User does not belong to an organization' });
+    }
+
+    // Check if user is project member
+    const boardDoc = await Board.findById(board).populate('project');
     if (!boardDoc) {
       return res.status(404).json({ msg: 'Board not found' });
     }
 
-    const workspace = await Workspace.findById(boardDoc.workspace._id || boardDoc.workspace);
-    if (!workspace) {
-      return res.status(404).json({ msg: 'Workspace not found' });
+    const project = await Project.findById(boardDoc.project._id || boardDoc.project);
+    if (!project) {
+      return res.status(404).json({ msg: 'Project not found' });
     }
 
-    const isWorkspaceMember = workspace.members.some(
-      (m) => m.user.toString() === req.user.id
-    );
-
-    if (!isWorkspaceMember && req.user.role !== 'admin') {
-      return res.status(403).json({ msg: 'You must be a workspace member to create tasks' });
+    // Get organization ID (handle both populated and non-populated cases)
+    const organizationId = user.organization._id || user.organization;
+    const organization = await Organization.findById(organizationId).populate('owner', '_id');
+    
+    if (!organization) {
+      return res.status(404).json({ msg: 'Organization not found' });
     }
 
-    // Validate assigned users are workspace members
+    // Check user belongs to same organization
+    const projectOrgId = project.organization._id || project.organization;
+    if (projectOrgId.toString() !== organizationId.toString()) {
+      return res.status(403).json({ msg: 'Access denied' });
+    }
+
+    // Check permissions: all members can create tasks
+    const canCreate = canCreateTask(user, organization);
+    console.log('Checking task creation permissions:', {
+      userId: user._id.toString(),
+      userRole: user.role,
+      orgOwner: organization.owner?._id?.toString() || organization.owner?.toString(),
+      isMember: isMember(user, organization),
+      canCreate: canCreate
+    });
+    
+    if (!canCreate) {
+      return res.status(403).json({ msg: 'You must be an organization member to create tasks' });
+    }
+
+    // Validate assigned users are project members (and in same org)
     if (assignedTo && Array.isArray(assignedTo)) {
-      const workspaceMemberIds = workspace.members.map((m) => m.user.toString());
+      const projectMemberIds = project.members.map((m) => (m.user._id || m.user).toString());
       const invalidUsers = assignedTo.filter((userId) => 
-        !workspaceMemberIds.includes(userId.toString())
+        !projectMemberIds.includes(userId.toString())
       );
       
       if (invalidUsers.length > 0) {
         return res.status(400).json({ 
-          msg: 'All assigned users must be workspace members' 
+          msg: 'All assigned users must be project members' 
         });
       }
     }
@@ -131,24 +166,41 @@ export const updateTask = async (req, res) => {
       return res.status(404).json({ msg: 'Task not found' });
     }
 
-    // Check workspace membership
-    const currentBoard = await Board.findById(task.board._id || task.board).populate('workspace');
+    const user = await User.findById(req.user.id);
+    
+    if (!user || !user.organization) {
+      return res.status(404).json({ msg: 'User does not belong to an organization' });
+    }
+
+    // Check project membership
+    const currentBoard = await Board.findById(task.board._id || task.board).populate('project');
     if (!currentBoard) {
       return res.status(404).json({ msg: 'Board not found' });
     }
 
-    const workspace = await Workspace.findById(currentBoard.workspace._id || currentBoard.workspace);
-    if (!workspace) {
-      return res.status(404).json({ msg: 'Workspace not found' });
+    const project = await Project.findById(currentBoard.project._id || currentBoard.project);
+    if (!project) {
+      return res.status(404).json({ msg: 'Project not found' });
     }
 
-    const isWorkspaceMember = workspace.members.some(
-      (m) => m.user.toString() === req.user.id
-    );
+    // Get organization ID (handle both populated and non-populated cases)
+    const organizationId = user.organization._id || user.organization;
+    const organization = await Organization.findById(organizationId).populate('owner', '_id');
+    
+    if (!organization) {
+      return res.status(404).json({ msg: 'Organization not found' });
+    }
 
-    if (!isWorkspaceMember && req.user.role !== 'admin') {
+    // Check user belongs to same organization
+    const projectOrgId = project.organization._id || project.organization;
+    if (projectOrgId.toString() !== organizationId.toString()) {
       return res.status(403).json({ msg: 'Access denied' });
     }
+
+    // Check if user is project member
+    const isProjectMember = project.members.some(
+      (m) => (m.user._id || m.user).toString() === req.user.id
+    );
 
     // Check if only board is being changed (moving task between boards)
     const isOnlyBoardChange = newBoardId !== undefined && 
@@ -158,63 +210,67 @@ export const updateTask = async (req, res) => {
       status === undefined && 
       assignedTo === undefined;
 
-    // If only moving between boards, any workspace member can do it
-    if (isOnlyBoardChange) {
-      // Already checked workspace membership above, so allow it
+    // Check if only status is being changed (drag and drop)
+    const isOnlyStatusChange = status !== undefined && 
+      status !== task.status &&
+      title === undefined && 
+      description === undefined && 
+      assignedTo === undefined &&
+      newBoardId === undefined;
+
+    // If only moving between boards or updating status, any project member can do it
+    if (isOnlyBoardChange || isOnlyStatusChange) {
+      // Allow if user is project member or org admin/owner
+      if (!isProjectMember && user.role !== 'owner' && user.role !== 'admin') {
+        return res.status(403).json({ msg: 'You must be a project member to move tasks' });
+      }
     } else {
-      // For other updates, check stricter authorization
-      const isWorkspaceAdmin = workspace.members.some(
-        (m) => m.user.toString() === req.user.id && m.role === 'admin'
-      );
-
-      const isAssigned = task.assignedTo.some(
-        (userId) => userId.toString() === req.user.id
-      );
-
-      const isAuthorized =
-        req.user.role === 'admin' ||
-        task.createdBy.toString() === req.user.id ||
-        isWorkspaceAdmin ||
-        isAssigned;
-
-      if (!isAuthorized) {
-        return res.status(403).json({ msg: 'Not authorized' });
+      // For other updates (title, description, assignedTo), check permissions
+      if (!canUpdateTask(user, organization, task)) {
+        console.log('Task update permission check failed:', {
+          userId: user._id.toString(),
+          userRole: user.role,
+          isProjectMember,
+          isAssigned: task.assignedTo?.some((userId) => userId.toString() === user._id.toString()),
+          canUpdate: canUpdateTask(user, organization, task)
+        });
+        return res.status(403).json({ msg: 'Not authorized to update this task' });
       }
     }
 
-    // If board is being changed, validate new board is in same workspace
+    // If board is being changed, validate new board is in same project
     if (newBoardId !== undefined && newBoardId !== (task.board._id || task.board).toString()) {
-      const newBoard = await Board.findById(newBoardId).populate('workspace');
+      const newBoard = await Board.findById(newBoardId).populate('project');
       if (!newBoard) {
         return res.status(404).json({ msg: 'New board not found' });
       }
       
-      const newWorkspace = await Workspace.findById(newBoard.workspace._id || newBoard.workspace);
-      if (!newWorkspace) {
-        return res.status(404).json({ msg: 'New workspace not found' });
+      const newProject = await Project.findById(newBoard.project._id || newBoard.project);
+      if (!newProject) {
+        return res.status(404).json({ msg: 'New project not found' });
       }
       
-      // Ensure new board is in the same workspace
-      const newWorkspaceId = (newWorkspace._id || newWorkspace).toString();
-      const currentWorkspaceId = (workspace._id || workspace).toString();
+      // Ensure new board is in the same project
+      const newProjectId = (newProject._id || newProject).toString();
+      const currentProjectId = (project._id || project).toString();
       
-      if (newWorkspaceId !== currentWorkspaceId) {
+      if (newProjectId !== currentProjectId) {
         return res.status(400).json({ 
-          msg: 'Cannot move task to a board in a different workspace' 
+          msg: 'Cannot move task to a board in a different project' 
         });
       }
     }
 
-    // Validate assigned users are workspace members
+    // Validate assigned users are project members (and in same org)
     if (assignedTo !== undefined && Array.isArray(assignedTo)) {
-      const workspaceMemberIds = workspace.members.map((m) => m.user.toString());
+      const projectMemberIds = project.members.map((m) => (m.user._id || m.user).toString());
       const invalidUsers = assignedTo.filter((userId) => 
-        !workspaceMemberIds.includes(userId.toString())
+        !projectMemberIds.includes(userId.toString())
       );
       
       if (invalidUsers.length > 0) {
         return res.status(400).json({ 
-          msg: 'All assigned users must be workspace members' 
+          msg: 'All assigned users must be project members' 
         });
       }
     }
@@ -268,11 +324,12 @@ export const updateTask = async (req, res) => {
 };
 
 /**
- * Update task status (task creator, assigned user, workspace member, or admin)
+ * Update task status (any project member can update status)
  */
 export const updateTaskStatus = async (req, res) => {
   try {
     const { status } = req.body;
+    const user = await User.findById(req.user.id);
 
     let task = await Task.findById(req.params.id).populate('board');
 
@@ -280,26 +337,31 @@ export const updateTaskStatus = async (req, res) => {
       return res.status(404).json({ msg: 'Task not found' });
     }
 
-    // Check workspace membership
-    const board = await Board.findById(task.board._id || task.board).populate('workspace');
+    // Check project membership
+    const board = await Board.findById(task.board._id || task.board).populate('project');
     if (!board) {
       return res.status(404).json({ msg: 'Board not found' });
     }
 
-    const workspace = await Workspace.findById(board.workspace._id || board.workspace);
-    if (!workspace) {
-      return res.status(404).json({ msg: 'Workspace not found' });
+    const project = await Project.findById(board.project._id || board.project);
+    if (!project) {
+      return res.status(404).json({ msg: 'Project not found' });
     }
 
-    const isWorkspaceMember = workspace.members.some(
-      (m) => m.user.toString() === req.user.id
-    );
-
-    if (!isWorkspaceMember && req.user.role !== 'admin') {
+    // Check user belongs to same organization
+    if (project.organization.toString() !== user.organization.toString()) {
       return res.status(403).json({ msg: 'Access denied' });
     }
 
-    // Any workspace member can update task status
+    const isProjectMember = project.members.some(
+      (m) => (m.user._id || m.user).toString() === req.user.id
+    );
+
+    if (!isProjectMember && user.role !== 'owner' && user.role !== 'admin') {
+      return res.status(403).json({ msg: 'Access denied' });
+    }
+
+    // Any project member can update task status
     task = await Task.findByIdAndUpdate(
       req.params.id,
       { $set: { status } },
@@ -311,52 +373,47 @@ export const updateTaskStatus = async (req, res) => {
     res.json(task);
   } catch (err) {
     console.error(err.message);
-    res.status(500).send('Server error');
+    res.status(500).json({ msg: 'Server error' });
   }
 };
 
 /**
- * Delete task (only task creator, workspace admin, or app admin)
+ * Delete task (only admin/owner can delete)
  */
 export const deleteTask = async (req, res) => {
   try {
+    const user = await User.findById(req.user.id).populate('organization');
     const task = await Task.findById(req.params.id).populate('board');
 
     if (!task) {
       return res.status(404).json({ msg: 'Task not found' });
     }
 
-    // Check workspace membership
-    const board = await Board.findById(task.board._id || task.board).populate('workspace');
+    // Check project membership
+    const board = await Board.findById(task.board._id || task.board).populate('project');
     if (!board) {
       return res.status(404).json({ msg: 'Board not found' });
     }
 
-    const workspace = await Workspace.findById(board.workspace._id || board.workspace);
-    if (!workspace) {
-      return res.status(404).json({ msg: 'Workspace not found' });
+    const project = await Project.findById(board.project._id || board.project);
+    if (!project) {
+      return res.status(404).json({ msg: 'Project not found' });
     }
 
-    const isWorkspaceMember = workspace.members.some(
-      (m) => m.user.toString() === req.user.id
-    );
+    if (!user.organization) {
+      return res.status(404).json({ msg: 'User does not belong to an organization' });
+    }
 
-    if (!isWorkspaceMember && req.user.role !== 'admin') {
+    const organization = await Organization.findById(user.organization);
+
+    // Check user belongs to same organization
+    if (project.organization.toString() !== user.organization.toString()) {
       return res.status(403).json({ msg: 'Access denied' });
     }
 
-    // Only creator, workspace admin, or app admin can delete
-    const isWorkspaceAdmin = workspace.members.some(
-      (m) => m.user.toString() === req.user.id && m.role === 'admin'
-    );
-
-    const isAuthorized =
-      req.user.role === 'admin' ||
-      task.createdBy.toString() === req.user.id ||
-      isWorkspaceAdmin;
-
-    if (!isAuthorized) {
-      return res.status(403).json({ msg: 'Not authorized' });
+    // Check permissions: only admin/owner can delete
+    if (!canDeleteTask(user, organization)) {
+      return res.status(403).json({ msg: 'Only admin/owner can delete tasks' });
     }
 
     // Delete attachment from Cloudinary if it exists

@@ -2,7 +2,7 @@ import express from 'express';
 import auth from '../middleware/auth.js';
 import {
   getBoards,
-  getBoardsByWorkspace,
+  getBoardsByProject,
   getBoardById,
   createBoard,
   updateBoard,
@@ -12,8 +12,8 @@ import {
 
 const router = express.Router();
 
-// Get boards by workspace
-router.get('/workspace/:workspaceId', auth, getBoardsByWorkspace);
+// Get boards by project
+router.get('/project/:projectId', auth, getBoardsByProject);
 // Get all boards user has access to
 router.get('/', auth, getBoards);
 router.get('/:id', auth, getBoardById);
