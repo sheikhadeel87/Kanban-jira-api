@@ -55,7 +55,7 @@ export const getTasksByBoard = async (req, res) => {
 export const createTask = async (req, res) => {
   try {
     // Handle both JSON and FormData
-    let { title, description, status, board, assignedTo } = req.body;
+    let { title, description, status, board, assignedTo, priority, dueDate } = req.body;
 
     // Ensure assignedTo is an array
     if (assignedTo && !Array.isArray(assignedTo)) {
@@ -132,6 +132,8 @@ export const createTask = async (req, res) => {
       board,
       assignedTo: assignedTo || [],
       createdBy: req.user.id,
+      priority: priority || 'medium',
+      dueDate: dueDate || null,
       // Store Cloudinary URL (secure_url or path)
       attachment: req.file ? (req.file.secure_url || req.file.path) : null,
     });
@@ -153,7 +155,7 @@ export const createTask = async (req, res) => {
 export const updateTask = async (req, res) => {
   try {
     // Handle both JSON and FormData
-    let { title, description, status, assignedTo, board: newBoardId } = req.body;
+    let { title, description, status, assignedTo, board: newBoardId, priority, dueDate } = req.body;
 
     // Ensure assignedTo is an array if provided
     if (assignedTo !== undefined && !Array.isArray(assignedTo)) {
@@ -281,6 +283,8 @@ export const updateTask = async (req, res) => {
     if (status !== undefined) updateData.status = status;
     if (assignedTo !== undefined) updateData.assignedTo = assignedTo;
     if (newBoardId !== undefined) updateData.board = newBoardId;
+    if (priority !== undefined) updateData.priority = priority;
+    if (dueDate !== undefined) updateData.dueDate = dueDate || null;
     
     // Handle file upload/update
     if (req.file) {
