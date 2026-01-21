@@ -31,7 +31,6 @@ const organizationInvitationSchema = new mongoose.Schema({
   invitationToken: {
     type: String,
     required: true,
-    unique: true,
     default: () => crypto.randomBytes(32).toString('hex'),
   },
   tokenExpiresAt: {
@@ -47,8 +46,11 @@ const organizationInvitationSchema = new mongoose.Schema({
 // Indexes for faster queries
 organizationInvitationSchema.index({ organization: 1 });
 organizationInvitationSchema.index({ invitedEmail: 1 });
-organizationInvitationSchema.index({ invitationToken: 1 });
+organizationInvitationSchema.index({ invitationToken: 1 }, { unique: true });
 organizationInvitationSchema.index({ organization: 1, invitedEmail: 1 }, { unique: true });
+
+// This will auto-delete expired invitations after 7 days
+organizationInvitationSchema.index({ tokenExpiresAt: 1 }, { expireAfterSeconds: 0 });
 
 const OrganizationInvitation = mongoose.model('OrganizationInvitation', organizationInvitationSchema);
 export default OrganizationInvitation;

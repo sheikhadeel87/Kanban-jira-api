@@ -96,13 +96,29 @@ export const getOrganizationUsers = async (req, res) => {
  */
 export const inviteUserToOrganization = async (req, res) => {
   try {
+    // Check if req.body exists
+    if (!req.body) {
+      console.error('Request body is missing');
+      return res.status(400).json({ msg: 'Request body is required' });
+    }
+
     const { email } = req.body;
     
-    console.log('Invite request received:', { email, userId: req.user.id });
+    console.log('Invite request received:', { 
+      email, 
+      userId: req.user.id,
+      bodyKeys: Object.keys(req.body || {}),
+      hasEmail: !!email
+    });
     
-    if (!email || !email.includes('@')) {
-      console.log('Invalid email format');
-      return res.status(400).json({ msg: 'Valid email is required' });
+    if (!email) {
+      console.log('Email field is missing');
+      return res.status(400).json({ msg: 'Email field is required' });
+    }
+
+    if (typeof email !== 'string' || !email.includes('@')) {
+      console.log('Invalid email format:', email);
+      return res.status(400).json({ msg: 'Valid email address is required' });
     }
 
     const user = await User.findById(req.user.id);
@@ -114,16 +130,29 @@ export const inviteUserToOrganization = async (req, res) => {
 
     // Get organization ID (handle both populated and non-populated cases)
     const organizationId = user.organization._id || user.organization;
-    const organization = await Organization.findById(organizationId);
+    const organization = await Organization.findById(organizationId).populate('owner', '_id');
     
     if (!organization) {
       console.log('Organization not found:', organizationId);
       return res.status(404).json({ msg: 'Organization not found' });
     }
 
-    if (!canInviteUser(user, organization)) {
-      console.log('User not authorized to invite:', { userRole: user.role, isOwner: organization.owner?.toString() === user._id.toString() });
-      return res.status(403).json({ msg: 'Not authorized to invite users' });
+    // Check permissions with populated owner
+    const canInvite = canInviteUser(user, organization);
+    console.log('Permission check:', {
+      userId: user._id.toString(),
+      userRole: user.role,
+      orgOwner: organization.owner?._id?.toString() || organization.owner?.toString(),
+      isOwner: organization.owner && (
+        (organization.owner._id?.toString() === user._id.toString()) ||
+        (organization.owner.toString() === user._id.toString())
+      ),
+      canInvite: canInvite
+    });
+
+    if (!canInvite) {
+      console.log('User not authorized to invite');
+      return res.status(403).json({ msg: 'Not authorized to invite users. Only admins and owners can invite.' });
     }
 
     const normalizedEmail = email.toLowerCase().trim();
@@ -161,16 +190,24 @@ export const inviteUserToOrganization = async (req, res) => {
       });
     }
 
+    // Block if invitation was accepted (user already in org)
+    if (existingInvitation && existingInvitation.status === 'accepted') {
+      console.log('Invitation was already accepted - user already in organization');
+      return res.status(400).json({ 
+        msg: 'User already in organization' 
+      });
+    }
+
     // If there's an old invitation (expired or declined), update it to create a new one
     let invitation;
-    if (existingInvitation) {
+    if (existingInvitation && (existingInvitation.status === 'declined' || existingInvitation.tokenExpiresAt <= new Date())) {
       console.log('Updating existing invitation');
       try {
         // Update existing invitation with new token and reset status
         existingInvitation.status = 'invited';
         existingInvitation.invitedBy = req.user.id;
         existingInvitation.invitationToken = crypto.randomBytes(32).toString('hex');
-        existingInvitation.tokenExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+        existingInvitation.tokenExpiresAt = new Date(Date.now() + 5  * 60 * 1000); // 5 minutes
         existingInvitation.memberId = null;
         await existingInvitation.save();
         invitation = existingInvitation;
@@ -211,26 +248,47 @@ export const inviteUserToOrganization = async (req, res) => {
 
     // Send invitation email
     const inviterName = user.name || 'Admin';
-    const emailResult = await sendOrganizationInvitation(
-      normalizedEmail,
-      inviterName,
-      organization.name,
-      invitation.invitationToken
-    );
+    let emailSent = false;
+    let emailError = null;
+    
+    try {
+      const emailResult = await sendOrganizationInvitation(
+        normalizedEmail,
+        inviterName,
+        organization.name,
+        invitation.invitationToken
+      );
 
-    if (!emailResult.success) {
-      console.warn('Failed to send invitation email:', emailResult.error || emailResult.message);
-      // Still return success since invitation was created, but log the email failure
+      if (emailResult.success) {
+        emailSent = true;
+        console.log('Invitation email sent successfully');
+      } else {
+        emailError = emailResult.error || emailResult.message;
+        console.warn('Failed to send invitation email:', emailError);
+      }
+    } catch (emailErr) {
+      emailError = emailErr.message;
+      console.error('Error sending invitation email:', emailErr);
     }
 
+    // Always return success since invitation was created in database
+    // The user can still access via the invitation link even if email fails
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const invitationLink = `${frontendUrl}/register?inviteToken=${invitation.invitationToken}&email=${encodeURIComponent(normalizedEmail)}`;
+
     res.json({ 
-      msg: 'Invitation sent successfully',
+      msg: emailSent 
+        ? 'Invitation sent successfully' 
+        : 'Invitation created but email failed to send. You can share the invitation link manually.',
       invitation: {
         _id: invitation._id,
         invitedEmail: invitation.invitedEmail,
         status: invitation.status,
         tokenExpiresAt: invitation.tokenExpiresAt,
-      }
+        invitationLink: invitationLink, // Include link so user can share manually
+      },
+      emailSent: emailSent,
+      emailError: emailError ? 'Email service configuration issue. Please check your Gmail App Password settings.' : null
     });
   } catch (err) {
     console.error('Invite user error:', err);

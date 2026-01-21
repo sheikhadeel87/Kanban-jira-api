@@ -1,23 +1,101 @@
 import nodemailer from 'nodemailer';
 
-// Create reusable transporter object using SMTP transport
+// Create reusable transporter with connection pooling
+let transporter = null;
+
 const createTransporter = () => {
-  // For development, you can use Gmail or other SMTP services
-  // For production, use services like SendGrid, Mailgun, or AWS SES
-  
-  // Using Gmail as default (requires app password)
-  // For other services, update the configuration accordingly
-  return nodemailer.createTransport({
+  // Reuse transporter if it exists and is still valid
+  if (transporter) {
+    return transporter;
+  }
+
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
+    throw new Error('Email credentials not configured');
+  }
+
+  // Gmail-specific configuration with better reliability
+  transporter = nodemailer.createTransport({
     service: process.env.EMAIL_SERVICE || 'gmail',
     auth: {
       user: process.env.EMAIL_USER,
       pass: process.env.EMAIL_PASSWORD,
     },
-    // For other SMTP services, use:
-    // host: process.env.SMTP_HOST,
-    // port: process.env.SMTP_PORT,
-    // secure: process.env.SMTP_SECURE === 'true', // true for 465, false for other ports
+    // Connection pool settings for better reliability
+    pool: true,
+    maxConnections: 1,
+    maxMessages: 3,
+    rateDelta: 1000, // 1 second between messages
+    rateLimit: 5, // Max 5 messages per rateDelta
+    // Gmail-specific options
+    secure: true,
+    tls: {
+      rejectUnauthorized: false, // For development, set to true in production
+    },
+    // Connection timeout
+    connectionTimeout: 10000, // 10 seconds
+    greetingTimeout: 10000,
+    socketTimeout: 10000,
   });
+
+  // Verify connection on creation
+  transporter.verify((error, success) => {
+    if (error) {
+      console.error('Email transporter verification failed:', error);
+      transporter = null; // Reset on failure
+    } else {
+      console.log('Email transporter is ready to send messages');
+    }
+  });
+
+  return transporter;
+};
+
+// Helper function to send email with retry logic
+const sendEmailWithRetry = async (mailOptions, retries = 3) => {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const transporter = createTransporter();
+      
+      // Verify connection before sending (non-blocking)
+      try {
+        await transporter.verify();
+      } catch (verifyError) {
+        console.warn('Transporter verification warning:', verifyError.message);
+        // Continue anyway, sometimes verification fails but sending works
+      }
+      
+      const info = await transporter.sendMail(mailOptions);
+      console.log('Email sent successfully:', {
+        messageId: info.messageId,
+        to: mailOptions.to,
+        subject: mailOptions.subject,
+        accepted: info.accepted,
+        rejected: info.rejected,
+      });
+      
+      return { success: true, messageId: info.messageId, info };
+    } catch (error) {
+      console.error(`Email send attempt ${i + 1}/${retries} failed:`, {
+        error: error.message,
+        code: error.code,
+        command: error.command,
+        response: error.response,
+        to: mailOptions.to,
+      });
+
+      // If it's the last retry, throw the error
+      if (i === retries - 1) {
+        // Reset transporter on persistent failure
+        transporter = null;
+        throw error;
+      }
+
+      // Wait before retrying (exponential backoff)
+      const delay = Math.pow(2, i) * 1000; // 1s, 2s, 4s
+      console.log(`Retrying email send in ${delay}ms...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
 };
 
 /**
@@ -30,11 +108,17 @@ export const sendBoardInvitation = async (toEmail, userName, inviterName, boardT
       return { success: false, message: 'Email service not configured' };
     }
 
-    const transporter = createTransporter();
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(toEmail)) {
+      console.error('Invalid email address:', toEmail);
+      return { success: false, error: 'Invalid email address' };
+    }
 
     const mailOptions = {
       from: `"${inviterName}" <${process.env.EMAIL_USER}>`,
       to: toEmail,
+      replyTo: process.env.EMAIL_USER,
       subject: `You've been invited to join "${boardTitle}" board`,
       html: `
         <!DOCTYPE html>
@@ -122,11 +206,16 @@ export const sendBoardInvitation = async (toEmail, userName, inviterName, boardT
       `,
     };
 
-    const info = await transporter.sendMail(mailOptions);
-    console.log('Email sent successfully:', info.messageId);
-    return { success: true, messageId: info.messageId };
+    const result = await sendEmailWithRetry(mailOptions);
+    return result;
   } catch (error) {
-    console.error('Error sending email:', error);
+    console.error('Error sending board invitation email:', {
+      error: error.message,
+      code: error.code,
+      command: error.command,
+      response: error.response,
+      to: toEmail,
+    });
     return { success: false, error: error.message };
   }
 };
@@ -135,7 +224,7 @@ export const sendBoardInvitation = async (toEmail, userName, inviterName, boardT
  * Send user invitation email (for registration/login)
  * @param {string} toEmail - Email address to send invitation to
  * @param {string} inviterName - Name of the person sending the invitation
- * @param {string} acceptanceUrl - URL to accept the invitation (with token)
+ * @param {string} inviterEmail - Email of the person sending the invitation
  * @param {string} loginUrl - URL to login page
  * @param {string} registerUrl - URL to register page (with invite token)
  * @param {string} action - 'login' or 'register' (for display purposes)
@@ -148,16 +237,19 @@ export const sendUserInvitation = async (toEmail, inviterName, inviterEmail, log
       return { success: false, message: 'Email service not configured' };
     }
 
-    const transporter = createTransporter();
-    
-    // Primary action URL - Register for new users, Login for existing
-    const primaryUrl = action === 'register' ? registerUrl : loginUrl;
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(toEmail)) {
+      console.error('Invalid email address:', toEmail);
+      return { success: false, error: 'Invalid email address' };
+    }
 
-    // console.log('Inviter info:', { inviterName, inviterEmail, loginUrl, registerUrl, action, invitationToken });
+    const primaryUrl = action === 'register' ? registerUrl : loginUrl;
 
     const mailOptions = {
       from: `"Kanban Board" <${process.env.EMAIL_USER}>`,
       to: toEmail,
+      replyTo: process.env.EMAIL_USER,
       subject: `You're invited to join ${inviterName}'s team on Kanban Board`,
       html: `
         <!DOCTYPE html>
@@ -333,11 +425,16 @@ You may ignore this email if you do not want to join the team. This invitation w
       `,
     };
 
-    const info = await transporter.sendMail(mailOptions);
-    console.log('Invitation email sent successfully:', info.messageId);
-    return { success: true, messageId: info.messageId };
+    const result = await sendEmailWithRetry(mailOptions);
+    return result;
   } catch (error) {
-    console.error('Error sending invitation email:', error);
+    console.error('Error sending invitation email:', {
+      error: error.message,
+      code: error.code,
+      command: error.command,
+      response: error.response,
+      to: toEmail,
+    });
     return { success: false, error: error.message };
   }
 };
@@ -356,8 +453,13 @@ export const sendOrganizationInvitation = async (toEmail, inviterName, organizat
       return { success: false, message: 'Email service not configured' };
     }
 
-    const transporter = createTransporter();
-    
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(toEmail)) {
+      console.error('Invalid email address:', toEmail);
+      return { success: false, error: 'Invalid email address' };
+    }
+
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
     const registerUrl = `${frontendUrl}/register?inviteToken=${invitationToken}&email=${encodeURIComponent(toEmail)}`;
     const loginUrl = `${frontendUrl}/login?inviteToken=${invitationToken}&email=${encodeURIComponent(toEmail)}`;
@@ -365,6 +467,7 @@ export const sendOrganizationInvitation = async (toEmail, inviterName, organizat
     const mailOptions = {
       from: `"Kanban Board" <${process.env.EMAIL_USER}>`,
       to: toEmail,
+      replyTo: process.env.EMAIL_USER,
       subject: `You're invited to join ${organizationName} on Kanban Board`,
       html: `
         <!DOCTYPE html>
@@ -475,11 +578,16 @@ You may ignore this email if you do not want to join the organization. This invi
       `,
     };
 
-    const info = await transporter.sendMail(mailOptions);
-    console.log('Organization invitation email sent successfully:', info.messageId);
-    return { success: true, messageId: info.messageId };
+    const result = await sendEmailWithRetry(mailOptions);
+    return result;
   } catch (error) {
-    console.error('Error sending organization invitation email:', error);
+    console.error('Error sending organization invitation email:', {
+      error: error.message,
+      code: error.code,
+      command: error.command,
+      response: error.response,
+      to: toEmail,
+    });
     return { success: false, error: error.message };
   }
 };

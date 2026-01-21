@@ -33,7 +33,6 @@ const teamSchema = new mongoose.Schema({
     invitationToken: {
         type: String,
         required: true,
-        unique: true,
     },
     tokenExpiresAt: {
         type: Date,
@@ -50,9 +49,8 @@ const teamSchema = new mongoose.Schema({
 // Indexes for faster queries
 teamSchema.index({ inviting_id: 1 });
 teamSchema.index({ member_id: 1 });
-teamSchema.index({ invitedEmail: 1 });
 teamSchema.index({ status: 1 });
-teamSchema.index({ invitationToken: 1 }); // Index for token lookup
+teamSchema.index({ invitationToken: 1 }, { unique: true });
 
 // Compound index to prevent duplicate invitations per email per inviter
 teamSchema.index({ inviting_id: 1, invitedEmail: 1 }, { unique: true });

@@ -64,16 +64,30 @@ export const register = async (req, res) => {
       });
     }
 
-    // Check if user already exists in this organization
+    // Check if user already exists in THIS organization
     let user = await User.findOne({ 
       email: email.toLowerCase(),
       organization: organizationId 
     });
 
     if (user) {
-      return res.status(400).json({ msg: 'User already exists in this organization' });
+      return res.status(400).json({ 
+        msg: 'User already exists in this organization',
+        error: 'You are already a member of this organization. Please log in instead.'
+      });
     }
 
+    // Check if user exists in ANY organization (for logging/info purposes)
+    const existingUserInOtherOrg = await User.findOne({ 
+      email: email.toLowerCase()
+    });
+
+    if (existingUserInOtherOrg) {
+      console.log(`User ${email} already exists in organization ${existingUserInOtherOrg.organization}, creating new record for organization ${organizationId}`);
+    }
+
+    // Create new user record for this organization
+    // Same email can exist in multiple organizations (each org has its own user record)
     user = new User({
       name,
       email: email.toLowerCase(),
@@ -84,7 +98,67 @@ export const register = async (req, res) => {
 
     const salt = await bcrypt.genSalt(10);
     user.password = await bcrypt.hash(password, salt);
-    await user.save();
+    
+    try {
+      await user.save();
+      console.log(`User created successfully: ${user.email} in organization ${organizationId}`);
+    } catch (saveErr) {
+      console.error('Error saving user:', saveErr);
+      
+      // Handle duplicate key error (E11000)
+      if (saveErr.code === 11000) {
+        const keyPattern = saveErr.keyPattern || {};
+        const keyValue = saveErr.keyValue || {};
+        
+        // Check if user actually exists in this organization now (race condition)
+        const checkUser = await User.findOne({ 
+          email: email.toLowerCase(),
+          organization: organizationId 
+        });
+        
+        if (checkUser) {
+          return res.status(400).json({ 
+            msg: 'User already exists in this organization',
+            error: 'You are already a member of this organization. Please log in instead.'
+          });
+        }
+        
+        // If it's the compound index (email + organization), user should exist
+        if (keyPattern.email === 1 && keyPattern.organization === 1) {
+          return res.status(400).json({ 
+            msg: 'User already exists in this organization',
+            error: 'Duplicate email in organization'
+          });
+        }
+        
+        // If it's just email (old unique index on email only), this is a database issue
+        if (keyPattern.email === 1 && !keyPattern.organization) {
+          console.error('Old email_1 index detected! This prevents users from joining multiple organizations.');
+          console.error('Error details:', {
+            code: saveErr.code,
+            keyPattern: saveErr.keyPattern,
+            keyValue: saveErr.keyValue,
+            index: saveErr.index,
+            errmsg: saveErr.errmsg
+          });
+          
+          return res.status(500).json({ 
+            msg: 'Database configuration error. Please contact support.',
+            error: 'Old database index detected. Run: node backend/scripts/force-drop-email-index.js',
+            details: 'The database has an old unique index on email that prevents users from joining multiple organizations.'
+          });
+        }
+        
+        // Generic duplicate key error
+        return res.status(400).json({ 
+          msg: 'Registration failed: duplicate entry',
+          error: 'Duplicate key error',
+          details: saveErr.errmsg || saveErr.message
+        });
+      }
+      
+      throw saveErr; // Re-throw if not a duplicate key error
+    }
 
     // If creating new organization, set user as owner
     if (userRole === 'owner') {
@@ -132,6 +206,59 @@ export const register = async (req, res) => {
     );
   } catch (err) {
     console.error('Registration error:', err);
+    console.error('Error details:', {
+      code: err.code,
+      keyPattern: err.keyPattern,
+      keyValue: err.keyValue,
+      index: err.index,
+      errmsg: err.errmsg
+    });
+    
+    // Handle duplicate key error (old email index or same email in same org)
+    if (err.code === 11000) {
+      const keyPattern = err.keyPattern || {};
+      const keyValue = err.keyValue || {};
+      
+      // Check if user actually exists in this organization
+      if (keyValue.email) {
+        const existingUser = await User.findOne({ 
+          email: keyValue.email,
+          organization: organizationId 
+        });
+        
+        if (existingUser) {
+          return res.status(400).json({ 
+            msg: 'User already exists in this organization',
+            error: 'Duplicate email in organization'
+          });
+        }
+      }
+      
+      // If it's a single-field email index (old index)
+      if (keyPattern.email === 1 && !keyPattern.organization) {
+        return res.status(400).json({ 
+          msg: 'Email registration failed. Please run: node backend/scripts/force-drop-email-index.js',
+          error: 'Database index issue detected',
+          details: 'Old email index may exist. Run the migration script to fix it.'
+        });
+      }
+      
+      // If it's the compound index but user doesn't exist, it's a race condition or stale data
+      if (keyPattern.email === 1 && keyPattern.organization === 1) {
+        return res.status(400).json({ 
+          msg: 'User already exists in this organization',
+          error: 'Duplicate email in organization'
+        });
+      }
+      
+      // Generic duplicate key error
+      return res.status(400).json({ 
+        msg: 'Registration failed: duplicate entry detected',
+        error: 'Duplicate key error',
+        details: err.errmsg || err.message
+      });
+    }
+    
     res.status(500).json({ msg: 'Server error', error: err.message });
   }
 };
