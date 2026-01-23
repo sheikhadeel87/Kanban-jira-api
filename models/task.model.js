@@ -9,11 +9,11 @@ const taskSchema = new mongoose.Schema({
   description: {
     type: String,
   },
-  status: {
-    type: String,
-    enum: ['todo', 'in_progress', 'completed'],
-    default: 'todo',
-  },
+  // status: {
+  //   type: String,
+  //   enum: ['todo', 'in_progress', 'completed'],
+  //   default: 'todo',
+  // },
   board: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Board',
@@ -53,7 +53,7 @@ const taskSchema = new mongoose.Schema({
 taskSchema.index({ board: 1 });
 taskSchema.index({ assignedTo: 1 });
 taskSchema.index({ createdBy: 1 });
-taskSchema.index({ status: 1 });
+// taskSchema.index({ status: 1 });
 
 const Task = mongoose.model('Task', taskSchema);
 export default Task;

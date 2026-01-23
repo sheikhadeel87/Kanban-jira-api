@@ -14,6 +14,7 @@ import boardsRoutes from './routes/boardsRoutes.js';
 import taskRoutes from './routes/taskRoutes.js';
 import userRoutes from './routes/userRoutes.js';
 import teamRoutes from './routes/teamRoutes.js';
+import commentRoutes from './routes/commentRoutes.js';
 
 dotenv.config();
 
@@ -206,6 +207,8 @@ app.use('/api/tasks', taskRoutes);
 app.use('/tasks', taskRoutes);
 app.use('/api/users', userRoutes);
 app.use('/users', userRoutes);
+app.use('/api/comments', commentRoutes);
+
 // Debug middleware before routes
 app.use('/api/teams', (req, res, next) => {
   console.log(`🔍 Teams API request: ${req.method} ${req.originalUrl} -> ${req.path}`);
