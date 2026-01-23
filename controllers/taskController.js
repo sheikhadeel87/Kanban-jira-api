@@ -55,7 +55,7 @@ export const getTasksByBoard = async (req, res) => {
 export const createTask = async (req, res) => {
   try {
     // Handle both JSON and FormData
-    let { title, description, status, board, assignedTo, priority, dueDate } = req.body;
+    let { title, description, comments, board, assignedTo, priority, dueDate,  } = req.body;
 
     // Ensure assignedTo is an array
     if (assignedTo && !Array.isArray(assignedTo)) {
@@ -128,7 +128,8 @@ export const createTask = async (req, res) => {
     const newTask = new Task({
       title,
       description,
-      status: status || 'todo',
+      comments: comments || '',
+      // status: status || 'todo',
       board,
       assignedTo: assignedTo || [],
       createdBy: req.user.id,
@@ -155,7 +156,7 @@ export const createTask = async (req, res) => {
 export const updateTask = async (req, res) => {
   try {
     // Handle both JSON and FormData
-    let { title, description, status, assignedTo, board: newBoardId, priority, dueDate } = req.body;
+    let { title, description, comments, assignedTo, board: newBoardId, priority, dueDate } = req.body;
 
     // Ensure assignedTo is an array if provided
     if (assignedTo !== undefined && !Array.isArray(assignedTo)) {
@@ -209,22 +210,33 @@ export const updateTask = async (req, res) => {
       newBoardId !== (task.board._id || task.board).toString() &&
       title === undefined && 
       description === undefined && 
-      status === undefined && 
+      comments === undefined && 
+      // status === undefined && 
       assignedTo === undefined;
 
-    // Check if only status is being changed (drag and drop)
-    const isOnlyStatusChange = status !== undefined && 
-      status !== task.status &&
+    // Check if only comments are being changed
+    const isOnlyCommentChange = comments !== undefined && 
       title === undefined && 
       description === undefined && 
       assignedTo === undefined &&
-      newBoardId === undefined;
+      newBoardId === undefined &&
+      priority === undefined &&
+      dueDate === undefined;
 
-    // If only moving between boards or updating status, any project member can do it
-    if (isOnlyBoardChange || isOnlyStatusChange) {
+    // Check if only status is being changed (drag and drop)
+    // const isOnlyStatusChange = status !== undefined && 
+    //   status !== task.status &&
+    //   title === undefined && 
+    //   description === undefined && 
+    //   comments === undefined && 
+    //   assignedTo === undefined &&
+    //   newBoardId === undefined;
+
+    // If only moving between boards, updating status, or updating comments, any project member can do it
+    if (isOnlyBoardChange || isOnlyCommentChange) {
       // Allow if user is project member or org admin/owner
       if (!isProjectMember && user.role !== 'owner' && user.role !== 'admin') {
-        return res.status(403).json({ msg: 'You must be a project member to move tasks' });
+        return res.status(403).json({ msg: 'You must be a project member to update this task' });
       }
     } else {
       // For other updates (title, description, assignedTo), check permissions
@@ -280,11 +292,12 @@ export const updateTask = async (req, res) => {
     const updateData = {};
     if (title !== undefined) updateData.title = title;
     if (description !== undefined) updateData.description = description;
-    if (status !== undefined) updateData.status = status;
+    if (comments !== undefined) updateData.comments = comments;
+    // if (status !== undefined) updateData.status = status;
     if (assignedTo !== undefined) updateData.assignedTo = assignedTo;
     if (newBoardId !== undefined) updateData.board = newBoardId;
     if (priority !== undefined) updateData.priority = priority;
-    if (dueDate !== undefined) updateData.dueDate = dueDate || null;
+    if (dueDate !== undefined) updateData.dueDate = dueDate || null;  
     
     // Handle file upload/update
     if (req.file) {
