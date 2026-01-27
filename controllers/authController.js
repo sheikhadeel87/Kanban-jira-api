@@ -47,7 +47,14 @@ export const register = async (req, res) => {
       }
 
       organizationId = invitation.organization;
-      // Role determined by invitation or defaults to member
+      // Explicitly get role from invitation, validate it, and default to 'member' if invalid
+      const invitedRole = invitation.role;
+      if (invitedRole && ['owner', 'admin', 'manager', 'member'].includes(invitedRole)) {
+        userRole = invitedRole;
+      } else {
+        userRole = 'member';
+      }
+      console.log(`Registration: Setting user role to '${userRole}' from invitation role '${invitedRole}'`);
     } else if (organizationName) {
       // First user creates organization
       const organization = new Organization({
@@ -101,7 +108,7 @@ export const register = async (req, res) => {
     
     try {
       await user.save();
-      console.log(`User created successfully: ${user.email} in organization ${organizationId}`);
+      console.log(`User created successfully: ${user.email} in organization ${organizationId} with role: ${user.role}`);
     } catch (saveErr) {
       console.error('Error saving user:', saveErr);
       

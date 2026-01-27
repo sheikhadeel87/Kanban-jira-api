@@ -28,6 +28,11 @@ const organizationInvitationSchema = new mongoose.Schema({
     enum: ['invited', 'accepted', 'declined'],
     default: 'invited',
   },
+  role: {
+    type: String,
+    enum: ['owner', 'admin', 'manager', 'member'],
+    default: 'member',
+  },
   invitationToken: {
     type: String,
     required: true,

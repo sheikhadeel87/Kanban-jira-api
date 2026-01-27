@@ -102,7 +102,7 @@ export const inviteUserToOrganization = async (req, res) => {
       return res.status(400).json({ msg: 'Request body is required' });
     }
 
-    const { email } = req.body;
+    const { email, role } = req.body;
     
     console.log('Invite request received:', { 
       email, 
@@ -136,6 +136,10 @@ export const inviteUserToOrganization = async (req, res) => {
       console.log('Organization not found:', organizationId);
       return res.status(404).json({ msg: 'Organization not found' });
     }
+
+    // Validate role if provided
+    const invitedRole = role && ['member', 'manager', 'admin'].includes(role) ? role : 'member';
+    console.log('Role received from request:', role, 'Validated role:', invitedRole);
 
     // Check permissions with populated owner
     const canInvite = canInviteUser(user, organization);
@@ -190,28 +194,42 @@ export const inviteUserToOrganization = async (req, res) => {
       });
     }
 
-    // Block if invitation was accepted (user already in org)
+    // Block if invitation was accepted AND user still exists in org
     if (existingInvitation && existingInvitation.status === 'accepted') {
-      console.log('Invitation was already accepted - user already in organization');
-      return res.status(400).json({ 
-        msg: 'User already in organization' 
+      // Double-check if user actually exists in the organization
+      const userStillExists = await User.findOne({ 
+        email: normalizedEmail,
+        organization: organization._id 
       });
+      
+      if (userStillExists) {
+        console.log('Invitation was already accepted - user already in organization');
+        return res.status(400).json({ 
+          msg: 'User already in organization' 
+        });
+      } else {
+        // User was deleted but invitation still shows as accepted, update it to allow new invitation
+        console.log('User was removed but invitation shows accepted, updating invitation');
+        existingInvitation.status = 'declined'; // Change to declined so it can be reused
+      }
     }
 
-    // If there's an old invitation (expired or declined), update it to create a new one
+    // If there's an old invitation (expired, declined, or accepted with deleted user), update it to create a new one
     let invitation;
-    if (existingInvitation && (existingInvitation.status === 'declined' || existingInvitation.tokenExpiresAt <= new Date())) {
+    if (existingInvitation && (existingInvitation.status === 'declined' || existingInvitation.status === 'accepted' || existingInvitation.tokenExpiresAt <= new Date())) {
       console.log('Updating existing invitation');
       try {
         // Update existing invitation with new token and reset status
         existingInvitation.status = 'invited';
         existingInvitation.invitedBy = req.user.id;
+        existingInvitation.invitedEmail = normalizedEmail; // Ensure email is normalized
         existingInvitation.invitationToken = crypto.randomBytes(32).toString('hex');
-        existingInvitation.tokenExpiresAt = new Date(Date.now() + 5  * 60 * 1000); // 5 minutes
+        existingInvitation.tokenExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
         existingInvitation.memberId = null;
+        existingInvitation.role = invitedRole; // Update role
         await existingInvitation.save();
         invitation = existingInvitation;
-        console.log('Invitation updated successfully');
+        console.log('Invitation updated successfully with role:', invitation.role);
       } catch (updateErr) {
         console.error('Error updating invitation:', updateErr);
         throw updateErr;
@@ -228,10 +246,11 @@ export const inviteUserToOrganization = async (req, res) => {
             organization: organization._id,
             invitedBy: req.user.id,
             invitedEmail: normalizedEmail,
+            role: invitedRole,
           });
 
           await invitation.save();
-          console.log('Invitation created successfully');
+          console.log('Invitation created successfully with role:', invitation.role);
           break; // Success, exit loop
         } catch (saveErr) {
           console.error('Error saving invitation (attempt ' + (retries + 1) + '):', saveErr);
@@ -338,3 +357,220 @@ export const deleteOrganization = async (req, res) => {
     res.status(500).json({ msg: 'Server error' });
   }
 };
+
+// Remove member from organization (owner only)
+export const removeMemberFromOrganization = async (req, res) => {
+  try {
+    const authUser = await User.findById(req.user.id);
+    if (!authUser?.organization) {
+      return res
+        .status(404)
+        .json({ msg: "User does not belong to an organization" });
+    }
+
+    const orgId = authUser.organization._id || authUser.organization;
+
+    const organization = await Organization.findById(orgId).populate(
+      "owner",
+      "_id"
+    );
+    if (!organization) {
+      return res.status(404).json({ msg: "Organization not found" });
+    }
+
+    if (!isOwner(authUser, organization)) {
+      return res
+        .status(403)
+        .json({ msg: "Only organization owner can remove members" });
+    }
+
+    const memberId = req.params.userId;
+    const ownerId = organization.owner?._id || organization.owner;
+
+    if (ownerId?.toString() === memberId) {
+      return res
+        .status(400)
+        .json({ msg: "Cannot remove organization owner" });
+    }
+
+    const member = await User.findOne({
+      _id: memberId,
+      organization: orgId,
+    });
+
+    if (!member) {
+      return res
+        .status(404)
+        .json({ msg: "Member not found in this organization" });
+    }
+
+    // Store member email before deletion
+    const memberEmail = member.email.toLowerCase();
+
+    // Delete the user record for this organization
+    // Note: User might have other records in other organizations, so we only delete this specific one
+    await User.findByIdAndDelete(memberId);
+
+    // Delete the invitation record(s) for this user in this organization
+    // This is organization-specific, so we delete it completely
+    const OrganizationInvitation = (await import('../models/organizationInvitation.model.js')).default;
+    try {
+      const deleteResult = await OrganizationInvitation.deleteMany({
+        organization: orgId,
+        $or: [
+          { invitedEmail: memberEmail },
+          { memberId: memberId }
+        ]
+      });
+      console.log(`Deleted ${deleteResult.deletedCount} invitation(s) for removed member ${memberEmail} from organization ${orgId}`);
+    } catch (inviteErr) {
+      console.error('Error deleting invitation:', inviteErr);
+      // Don't fail the entire operation if invitation deletion fails
+    }
+
+    res.json({ msg: "Member removed successfully" });
+  } catch (err) {
+    console.error("Remove member error:", err);
+    res.status(500).json({ msg: "Server error" });
+  }
+};
+
+/**
+ * Update member name and role (owner only)
+ */
+export const updateMember = async (req, res) => {
+  try {
+    const authUser = await User.findById(req.user.id);
+    if (!authUser?.organization) {
+      return res.status(404).json({ msg: "User does not belong to an organization" });
+    }
+
+    const orgId = authUser.organization._id || authUser.organization;
+    const organization = await Organization.findById(orgId).populate('owner', '_id');
+
+    if (!organization) {
+      return res.status(404).json({ msg: "Organization not found" });
+    }
+
+    // Only owner can update members
+    if (!isOwner(authUser, organization)) {
+      return res.status(403).json({ msg: "Only organization owner can update members" });
+    }
+
+    const memberId = req.params.userId;
+    const { name, role } = req.body;
+
+    // Validate role if provided
+    if (role && !['admin', 'manager', 'member'].includes(role)) {
+      return res.status(400).json({ msg: "Invalid role. Must be admin, manager, or member" });
+    }
+
+    const member = await User.findOne({ _id: memberId, organization: orgId });
+
+    if (!member) {
+      return res.status(404).json({ msg: "Member not found in this organization" });
+    }
+
+    // Cannot change owner role
+    const ownerId = organization.owner?._id || organization.owner;
+    if (ownerId?.toString() === memberId && role && role !== 'owner') {
+      return res.status(400).json({ msg: "Cannot change organization owner role" });
+    }
+
+    // Update name and/or role (email remains unchanged)
+    if (name) member.name = name.trim();
+    if (role) member.role = role;
+
+    await member.save();
+
+    res.json({
+      msg: "Member updated successfully",
+      user: {
+        _id: member._id,
+        name: member.name,
+        email: member.email,
+        role: member.role
+      }
+    });
+  } catch (err) {
+    console.error("Update member error:", err);
+    res.status(500).json({ msg: "Server error" });
+  }
+};
+
+/**
+ * Update user role based on their invitation (sync role from invitation to user)
+ */
+export const syncUserRoleFromInvitation = async (req, res) => {
+  try {
+    const authUser = await User.findById(req.user.id);
+    if (!authUser || !authUser.organization) {
+      return res.status(404).json({ msg: "User not found or no organization" });
+    }
+
+    const orgId = authUser.organization._id || authUser.organization;
+    const organization = await Organization.findById(orgId).populate('owner', '_id');
+
+    if (!organization) {
+      return res.status(404).json({ msg: "Organization not found" });
+    }
+
+    // Only owner can sync roles
+    if (!isOwner(authUser, organization)) {
+      return res.status(403).json({ msg: "Only organization owner can sync user roles" });
+    }
+
+    const userId = req.params.userId;
+    const user = await User.findOne({ _id: userId, organization: orgId });
+
+    if (!user) {
+      return res.status(404).json({ msg: "User not found in this organization" });
+    }
+
+    // Find the invitation for this user
+    const OrganizationInvitation = (await import('../models/organizationInvitation.model.js')).default;
+    const invitation = await OrganizationInvitation.findOne({
+      organization: orgId,
+      $or: [
+        { invitedEmail: user.email.toLowerCase() },
+        { memberId: userId }
+      ],
+      status: { $in: ['accepted', 'invited'] }
+    }).sort({ createdAt: -1 }); // Get the most recent invitation
+
+    console.log(`Sync role: Looking for invitation for user ${user.email} in org ${orgId}`);
+    console.log(`Sync role: Found invitation:`, invitation ? { 
+      _id: invitation._id, 
+      role: invitation.role, 
+      status: invitation.status,
+      invitedEmail: invitation.invitedEmail 
+    } : 'none');
+
+    if (!invitation) {
+      return res.status(404).json({ msg: "No invitation found for this user" });
+    }
+
+    // Update user role to match invitation role
+    if (invitation.role && ['owner', 'admin', 'manager', 'member'].includes(invitation.role)) {
+      const oldRole = user.role;
+      user.role = invitation.role;
+      await user.save();
+      console.log(`Updated user ${user.email} role from ${oldRole} to ${invitation.role} based on invitation`);
+      return res.json({ 
+        msg: "User role synced successfully",
+        user: {
+          _id: user._id,
+          name: user.name,
+          email: user.email,
+          role: user.role
+        }
+      });
+    } else {
+      return res.status(400).json({ msg: "Invalid role in invitation" });
+    }
+  } catch (err) {
+    console.error("Sync user role error:", err);
+    res.status(500).json({ msg: "Server error" });
+  }
+};
+

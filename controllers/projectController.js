@@ -23,7 +23,7 @@ export const getProjects = async (req, res) => {
     console.log('Fetching projects for user:', {
       userId: userIdStr,
       userRole: user.role,
-      organizationId: organizationId.toString()
+      organizationId: organizationId?.toString() || organizationId
     });
 
     // First, get all projects in the organization
@@ -39,9 +39,7 @@ export const getProjects = async (req, res) => {
       totalProjects: allOrgProjects.length,
       projects: allOrgProjects.map(p => {
         const membersList = p.members ? p.members.map(m => {
-          const userId = m.user?._id 
-            ? m.user._id.toString() 
-            : m.user?.toString() || m.user.toString();
+          const userId = m.user?._id?.toString() || m.user?.toString() || null;
           return {
             userId: userId,
             role: m.role || 'member',
@@ -51,7 +49,7 @@ export const getProjects = async (req, res) => {
         return {
           id: p._id.toString(),
           name: p.name,
-          createdBy: (p.createdBy._id || p.createdBy).toString(),
+          createdBy: p.createdBy?._id?.toString() || p.createdBy?.toString() || null,
           members: membersList,
           membersCount: membersList.length
         };
@@ -69,9 +67,7 @@ export const getProjects = async (req, res) => {
       }
 
       // Check if user is the creator (handle both populated and non-populated)
-      const createdById = project.createdBy?._id 
-        ? project.createdBy._id.toString() 
-        : project.createdBy?.toString() || project.createdBy.toString();
+      const createdById = project.createdBy?._id?.toString() || project.createdBy?.toString() || null;
       
       if (createdById === userIdStr) {
         console.log(`User ${userIdStr} is creator of project ${project._id}`);
@@ -125,7 +121,7 @@ export const getProjects = async (req, res) => {
     console.log('User:', {
       id: userIdStr,
       role: user.role,
-      organizationId: organizationId.toString()
+      organizationId: organizationId?.toString() || organizationId
     });
     console.log('Organization Projects:', {
       total: allOrgProjects.length,
@@ -135,14 +131,11 @@ export const getProjects = async (req, res) => {
     if (accessibleProjects.length > 0) {
       console.log('Accessible Projects:');
       accessibleProjects.forEach(p => {
-        const createdById = p.createdBy?._id 
-          ? p.createdBy._id.toString() 
-          : p.createdBy?.toString() || p.createdBy.toString();
+        const createdById = p.createdBy?._id?.toString() || p.createdBy?.toString() || null;
         const isCreator = createdById === userIdStr;
         const isMember = p.members && p.members.some(m => {
-          const memberUserId = m.user._id 
-            ? m.user._id.toString() 
-            : m.user.toString();
+          if (!m?.user) return false;
+          const memberUserId = m.user._id?.toString() || m.user?.toString() || null;
           return memberUserId === userIdStr;
         });
         const reason = (user.role === 'owner' || user.role === 'admin') 
@@ -156,7 +149,8 @@ export const getProjects = async (req, res) => {
         console.log(`  - ${p.name} (${p._id}): ${reason}`);
         console.log(`    Members: ${p.members?.length || 0}`, 
           p.members?.map(m => {
-            const mid = m.user._id ? m.user._id.toString() : m.user.toString();
+            if (!m?.user) return 'null';
+            const mid = m.user._id?.toString() || m.user?.toString() || 'null';
             return `${mid}(${m.role})`;
           }).join(', ') || 'none'
         );
@@ -170,8 +164,39 @@ export const getProjects = async (req, res) => {
     }
     console.log('==============================');
 
+    // Clean and serialize projects before sending
+    const cleanedProjects = accessibleProjects.map(project => {
+      // Filter out members with null/invalid user references
+      const validMembers = (project.members || []).filter(m => m?.user).map(m => ({
+        user: {
+          _id: m.user._id?.toString() || m.user?.toString(),
+          name: m.user.name || 'Unknown',
+          email: m.user.email || ''
+        },
+        role: m.role || 'member'
+      }));
+
+      return {
+        _id: project._id,
+        name: project.name,
+        description: project.description,
+        createdBy: project.createdBy ? {
+          _id: project.createdBy._id?.toString() || project.createdBy?.toString(),
+          name: project.createdBy.name || 'Unknown',
+          email: project.createdBy.email || ''
+        } : null,
+        organization: project.organization ? {
+          _id: project.organization._id?.toString() || project.organization?.toString(),
+          name: project.organization.name || 'Unknown'
+        } : null,
+        members: validMembers,
+        createdAt: project.createdAt,
+        updatedAt: project.updatedAt
+      };
+    });
+
     // Always return an array, even if empty
-    res.json(accessibleProjects || []);
+    res.json(cleanedProjects || []);
   } catch (err) {
     console.error('Error in getProjects:', err);
     res.status(500).json({ msg: 'Server error', error: err.message });
@@ -203,11 +228,13 @@ export const getProjectById = async (req, res) => {
     const projectOrgId = project.organization._id || project.organization;
 
     // Check if user belongs to same organization
-    if (projectOrgId.toString() !== userOrgId.toString()) {
+    const userOrgIdStr = userOrgId?.toString() || String(userOrgId);
+    const projectOrgIdStr = projectOrgId?.toString() || String(projectOrgId);
+    if (userOrgIdStr !== projectOrgIdStr) {
       console.log('Organization mismatch:', {
         userId: req.user.id,
-        userOrgId: userOrgId.toString(),
-        projectOrgId: projectOrgId.toString()
+        userOrgId: userOrgIdStr,
+        projectOrgId: projectOrgIdStr
       });
       return res.status(403).json({ msg: 'Access denied' });
     }
@@ -215,12 +242,13 @@ export const getProjectById = async (req, res) => {
     // Check if user is a member (handle both populated and non-populated member.user)
     const userIdStr = req.user.id.toString();
     const isMember = project.members.some((m) => {
-      const memberUserId = (m.user._id || m.user).toString();
+      if (!m?.user) return false;
+      const memberUserId = m.user._id?.toString() || m.user?.toString() || null;
       return memberUserId === userIdStr;
     });
 
     // Also check if user is the project creator
-    const isCreator = (project.createdBy._id || project.createdBy).toString() === userIdStr;
+    const isCreator = (project.createdBy?._id?.toString() || project.createdBy?.toString() || null) === userIdStr;
 
     // Allow access if: user is project member, creator, or org admin/owner
     if (!isMember && !isCreator && user.role !== 'owner' && user.role !== 'admin') {
@@ -230,14 +258,42 @@ export const getProjectById = async (req, res) => {
         isMember,
         isCreator,
         projectMembers: project.members.map(m => ({
-          memberUserId: (m.user._id || m.user).toString(),
+          memberUserId: m.user?._id?.toString() || m.user?.toString() || null,
           memberRole: m.role
         }))
       });
       return res.status(403).json({ msg: 'Access denied. You must be a project member to view this project.' });
     }
 
-    res.json(project);
+    // Clean and serialize project before sending
+    const validMembers = (project.members || []).filter(m => m?.user).map(m => ({
+      user: {
+        _id: m.user._id?.toString() || m.user?.toString(),
+        name: m.user.name || 'Unknown',
+        email: m.user.email || ''
+      },
+      role: m.role || 'member'
+    }));
+
+    const cleanedProject = {
+      _id: project._id,
+      name: project.name,
+      description: project.description,
+      createdBy: project.createdBy ? {
+        _id: project.createdBy._id?.toString() || project.createdBy?.toString(),
+        name: project.createdBy.name || 'Unknown',
+        email: project.createdBy.email || ''
+      } : null,
+      organization: project.organization ? {
+        _id: project.organization._id?.toString() || project.organization?.toString(),
+        name: project.organization.name || 'Unknown'
+      } : null,
+      members: validMembers,
+      createdAt: project.createdAt,
+      updatedAt: project.updatedAt
+    };
+
+    res.json(cleanedProject);
   } catch (err) {
     console.error('Error in getProjectById:', err);
     res.status(500).json({ msg: 'Server error', error: err.message });
