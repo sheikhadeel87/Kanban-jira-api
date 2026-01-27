@@ -15,6 +15,7 @@ import taskRoutes from './routes/taskRoutes.js';
 import userRoutes from './routes/userRoutes.js';
 import teamRoutes from './routes/teamRoutes.js';
 import commentRoutes from './routes/commentRoutes.js';
+import notificationRoutes from './routes/notificationRoutes.js';
 
 dotenv.config();
 
@@ -208,6 +209,8 @@ app.use('/tasks', taskRoutes);
 app.use('/api/users', userRoutes);
 app.use('/users', userRoutes);
 app.use('/api/comments', commentRoutes);
+app.use('/api/notifications', notificationRoutes);
+app.use('/notifications', notificationRoutes);
 
 // Debug middleware before routes
 app.use('/api/teams', (req, res, next) => {

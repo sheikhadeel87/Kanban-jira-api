@@ -39,3 +39,6 @@ logs/
 # Uploads folder - keep folder, ignore files
 backend/uploads/*
 !backend/uploads/.gitkeep
+
+# Firebase service account
+firebase-service-account.json
