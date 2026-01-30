@@ -9,11 +9,6 @@ const taskSchema = new mongoose.Schema({
   description: {
     type: String,
   },
-  // status: {
-  //   type: String,
-  //   enum: ['todo', 'in_progress', 'completed'],
-  //   default: 'todo',
-  // },
   board: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Board',

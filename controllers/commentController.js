@@ -59,6 +59,17 @@ res.status(500).json({ msg: 'Server error' });
 }
 };
 
+// Extract mentioned user IDs from comment text
+export const extractMentionedUserIds = (text = "") => {
+  const ids = new Set();
+  const regex = /@\[[^\]]+\]\(([^)]+)\)/g;
+  let m;
+  while ((m = regex.exec(text)) !== null) {
+    if (mongoose.Types.ObjectId.isValid(m[1])) ids.add(m[1]);
+  }
+  return Array.from(ids);
+}
+
  // Create a new comment
 export const createComment = async (req, res) => {
     try {
@@ -115,10 +126,12 @@ const isProjectMember = project.members.some(
 
 
     // Create comment
+    const mentionedUserIds = extractMentionedUserIds(text.trim());
     const comment = new Comment({
         text: text.trim(),
         task: taskId,
         author: req.user.id,
+        mentions: mentionedUserIds,
       });
   
       await comment.save();
