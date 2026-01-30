@@ -5,6 +5,7 @@ import Organization from '../models/organization.model.js';
 import User from '../models/user.model.js';
 import { canCreateTask, canUpdateTask, canDeleteTask, isMember } from '../utils/permissions.js';
 import { deleteFromCloudinary } from '../config/cloudinary.js';
+import { sendPushToUser } from '../utils/pushService.js'
 
 /**
  * Get all tasks for a board (only board members can view)
@@ -143,6 +144,30 @@ export const createTask = async (req, res) => {
     await task.populate('assignedTo', 'name email');
     await task.populate('createdBy', 'name email');
 
+   // ✅ PUSH: notify assignees on task creation
+try {
+  const creatorId = String(req.user.id);
+  const assignees = (task.assignedTo || []).map((u) => String(u._id || u));
+  const notifyUsers = assignees.filter((id) => id !== creatorId);
+
+  await Promise.all(
+    notifyUsers.map((uid) =>
+      sendPushToUser({
+        userId: uid,
+        title: "Task Assigned",
+        body: `You were assigned: ${task.title}`,
+        link: `/boards/${task.board}?task=${task._id}`,
+        data: {
+          type: "TASK_ASSIGNED",
+          taskId: String(task._id),
+          boardId: String(task.board),
+        },
+      })
+    )
+  );
+} catch (pushErr) {
+  console.error("Push error (createTask):", pushErr?.message || pushErr);
+}
     res.json(task);
   } catch (err) {
     console.error(err.message);
@@ -163,11 +188,17 @@ export const updateTask = async (req, res) => {
       assignedTo = assignedTo ? [assignedTo] : [];
     }
 
-    let task = await Task.findById(req.params.id).populate('board');
+    // Populate task with assignedTo and createdBy
+    let task = await Task.findById(req.params.id)
+    .populate('board')
+    .populate("assignedTo", "name email")
+    .populate("createdBy", "name email");;
 
     if (!task) {
       return res.status(404).json({ msg: 'Task not found' });
     }
+    // ✅ Save old assignees BEFORE update (for diff)
+const oldAssigned = (task.assignedTo || []).map((u) => String(u._id || u));
 
     const user = await User.findById(req.user.id);
     
@@ -333,6 +364,70 @@ export const updateTask = async (req, res) => {
       .populate('assignedTo', 'name email')
       .populate('createdBy', 'name email');
 
+    const boardId = String(task.board?._id || task.board);
+    const newAssigned = (task.assignedTo || []).map((u) => String(u._id || u));
+    const updaterId = String(req.user.id);
+
+    // ✅ PUSH: notify newly assigned users + existing assignees when task content changed
+    try {
+      // 1) "Task Assigned" — only to newly added assignees
+      if (assignedTo !== undefined) {
+        const newlyAdded = newAssigned.filter((id) => !oldAssigned.includes(id));
+        const notifyUsers = newlyAdded.filter((id) => id !== updaterId);
+
+        console.log('Push (updateTask):', {
+          assignedInBody: !!assignedTo,
+          oldAssigned,
+          newAssigned,
+          newlyAdded,
+          notifyUsers,
+        });
+
+        await Promise.all(
+          notifyUsers.map((uid) =>
+            sendPushToUser({
+              userId: uid,
+              title: "Task Assigned",
+              body: `You were assigned: ${task.title}`,
+              link: `/boards/${boardId}?task=${task._id}`,
+              data: {
+                type: "TASK_ASSIGNED",
+                taskId: String(task._id),
+                boardId,
+              },
+            })
+          )
+        );
+      }
+
+      // 2) Notify existing assignees: "Task status updated" when only board moved (drag), else "Task updated"
+      const contentChanged = Object.keys(updateData).some((k) => k !== 'assignedTo');
+      if (contentChanged && newAssigned.length > 0) {
+        const existingAssignees = newAssigned.filter((id) => oldAssigned.includes(id));
+        const notifyForUpdate = existingAssignees.filter((id) => id !== updaterId);
+
+        const onlyBoardChange = Object.keys(updateData).filter((k) => k !== 'assignedTo').length === 1 && updateData.board !== undefined;
+
+        await Promise.all(
+          notifyForUpdate.map((uid) =>
+            sendPushToUser({
+              userId: uid,
+              title: onlyBoardChange ? "Task status updated" : "Task updated",
+              body: onlyBoardChange ? `"${task.title}" was moved` : `"${task.title}" was updated`,
+              link: `/boards/${boardId}?task=${task._id}`,
+              data: {
+                type: onlyBoardChange ? "TASK_STATUS_UPDATED" : "TASK_UPDATED",
+                taskId: String(task._id),
+                boardId,
+              },
+            })
+          )
+        );
+      }
+    } catch (pushErr) {
+      console.error("Push error (updateTask):", pushErr?.message || pushErr);
+    }
+
     res.json(task);
   } catch (err) {
     console.error(err.message);
@@ -348,34 +443,34 @@ export const updateTaskStatus = async (req, res) => {
     const { status } = req.body;
     const user = await User.findById(req.user.id);
 
-    let task = await Task.findById(req.params.id).populate('board');
+    let task = await Task.findById(req.params.id).populate("board");
 
     if (!task) {
-      return res.status(404).json({ msg: 'Task not found' });
+      return res.status(404).json({ msg: "Task not found" });
     }
 
     // Check project membership
-    const board = await Board.findById(task.board._id || task.board).populate('project');
+    const board = await Board.findById(task.board._id || task.board).populate("project");
     if (!board) {
-      return res.status(404).json({ msg: 'Board not found' });
+      return res.status(404).json({ msg: "Board not found" });
     }
 
     const project = await Project.findById(board.project._id || board.project);
     if (!project) {
-      return res.status(404).json({ msg: 'Project not found' });
+      return res.status(404).json({ msg: "Project not found" });
     }
 
     // Check user belongs to same organization
     if (project.organization.toString() !== user.organization.toString()) {
-      return res.status(403).json({ msg: 'Access denied' });
+      return res.status(403).json({ msg: "Access denied" });
     }
 
     const isProjectMember = project.members.some(
       (m) => (m.user._id || m.user).toString() === req.user.id
     );
 
-    if (!isProjectMember && user.role !== 'owner' && user.role !== 'admin') {
-      return res.status(403).json({ msg: 'Access denied' });
+    if (!isProjectMember && user.role !== "owner" && user.role !== "admin") {
+      return res.status(403).json({ msg: "Access denied" });
     }
 
     // Any project member can update task status
@@ -384,13 +479,42 @@ export const updateTaskStatus = async (req, res) => {
       { $set: { status } },
       { new: true }
     )
-      .populate('assignedTo', 'name email')
-      .populate('createdBy', 'name email');
+      .populate("assignedTo", "name email")
+      .populate("createdBy", "name email");
 
-    res.json(task);
+    // ✅ PUSH: notify assignees that status changed (before res.json)
+    try {
+      const updaterId = String(req.user.id);
+      const assignees = (task.assignedTo || []).map((u) => String(u._id || u));
+
+      // optional: don't notify the person who moved it
+      const notifyUsers = assignees.filter((id) => id !== updaterId);
+
+      await Promise.all(
+        notifyUsers.map((uid) =>
+          sendPushToUser({
+            userId: uid,
+            title: "Task Status Updated",
+            body: `"${task.title}" moved to ${status}`,
+            link: `/boards/${task.board}?task=${task._id}`,
+            data: {
+              type: "STATUS_CHANGED",
+              taskId: String(task._id),
+              boardId: String(task.board),
+              status: String(status),
+            },
+          })
+        )
+      );
+    } catch (pushErr) {
+      // don't fail the API if push fails
+      console.error("Push error (status update):", pushErr?.message || pushErr);
+    }
+
+    return res.json(task);
   } catch (err) {
     console.error(err.message);
-    res.status(500).json({ msg: 'Server error' });
+    return res.status(500).json({ msg: "Server error" });
   }
 };
 

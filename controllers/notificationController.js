@@ -1,44 +1,55 @@
-import admin from '../firebaseAdmin.js';
+import Notification from '../models/notification.mode.js';
 
-export const sendNotification = async (req, res) => {
+export const getNotifications = async (req, res) => {
   try {
-    const { token, title, body } = req.body;
+    const notifications = await Notification.find({ userId: req.user.id })
+      .sort({ createdAt: -1 })
+      .limit(50);
+    res.json(notifications);
+  } catch (err) {
+    res.status(500).json({ msg: 'Server error' });
+  }
+};
 
-     // Debug logs to check token
-     console.log("token type:", typeof token);
-     console.log("token length:", token?.length);
-     console.log("token preview:", token?.slice(0, 20));
-     console.log("full token:", token);
+export const getUnreadCount = async (req, res) => {
+  try {
+    const count = await Notification.countDocuments({ userId: req.user.id, isRead: false });
+    res.json({ count });
+  } catch (err) {
+    res.status(500).json({ msg: 'Server error' });
+  }
+};
 
-    if (!token || !title || !body) {
-      return res.status(400).json({ 
-        error: 'Missing required fields: token, title, body' 
-      });
-    }
+export const markAsRead = async (req, res) => {
+  try {
+    await Notification.findByIdAndUpdate(req.params.id, { isRead: true });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ msg: 'Server error' });
+  }
+};
 
-    const message = {
-      token,
-      notification: {
-        title,
-        body,
-      },
-    };
+export const markAllAsRead = async (req, res) => {
+  try {
+    await Notification.updateMany({ userId: req.user.id }, { isRead: true });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ msg: 'Server error' });
+  }
+};
 
-    console.log("sending token len:", token.length);
-console.log("sending token preview:", token.slice(0, 30));
-
-    const response = await admin.messaging().send(message);
-
-    res.json({ 
-      success: true, 
-      message: 'Notification sent successfully',
-      messageId: response 
+export const createNotification = async (req, res) => {
+  try {
+    const { title, body, link, data } = req.body;
+    const notification = await Notification.create({ 
+      userId: req.user.id, 
+      title, 
+      body, 
+      link: link || '/', 
+      data: data || {} 
     });
-  } catch (error) {
-    console.error('Error sending notification:', error);
-    res.status(500).json({ 
-      error: 'Failed to send notification',
-      details: error.message 
-    });
+    res.json(notification);
+  } catch (err) {
+    res.status(500).json({ msg: 'Server error' });
   }
 };
