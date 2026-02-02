@@ -39,12 +39,16 @@ try {
     }
   }
 
-  // Option 3: Use local file (development)
+  // Option 3: Use local file (development only - file is gitignored, never on Vercel)
   if (!serviceAccount) {
-    const serviceAccountPath = path.join(__dirname, "firebase-service-account.json");
-    if (fs.existsSync(serviceAccountPath)) {
-      serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, "utf8"));
-      console.log("Firebase: Using credentials from firebase-service-account.json file");
+    try {
+      const serviceAccountPath = path.join(__dirname, "firebase-service-account.json");
+      if (fs.existsSync(serviceAccountPath)) {
+        serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, "utf8"));
+        console.log("Firebase: Using credentials from firebase-service-account.json file");
+      }
+    } catch (e) {
+      // File missing on Vercel - expected, skip
     }
   }
 
