@@ -44,6 +44,14 @@ router.post("/register", auth, async (req, res) => {
  */
 router.post("/test", auth, async (req, res) => {
   try {
+    // Check if Firebase is available
+    if (!admin) {
+      return res.status(503).json({ 
+        error: "Push notifications not configured",
+        message: "Firebase credentials not available. Set FIREBASE_SERVICE_ACCOUNT_JSON env var."
+      });
+    }
+
     const records = await PushToken.find({
       userId: req.user._id,
       platform: "web",

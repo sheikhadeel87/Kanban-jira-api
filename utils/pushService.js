@@ -11,6 +11,17 @@ export async function sendPushToUser({
   data = {},
 }) {
   try {
+    // Check if Firebase is available
+    if (!admin) {
+      console.warn("Push skipped: Firebase not configured");
+      // Still save notification to database even if push is disabled
+      const normalizedUserId = mongoose.Types.ObjectId.isValid(userId)
+        ? new mongoose.Types.ObjectId(userId)
+        : userId;
+      await Notification.create({ userId: normalizedUserId, title, body, link, data });
+      return { ok: false, reason: "NO_FIREBASE" };
+    }
+
     const normalizedUserId = mongoose.Types.ObjectId.isValid(userId)
       ? new mongoose.Types.ObjectId(userId)
       : userId;
@@ -18,6 +29,8 @@ export async function sendPushToUser({
     const records = await PushToken.find({ userId: normalizedUserId });
     if (!records.length) {
       console.warn('Push (NO_TOKENS):', { userId: String(normalizedUserId) });
+      // Still save notification to database
+      await Notification.create({ userId: normalizedUserId, title, body, link, data });
       return { ok: false, reason: "NO_TOKENS" };
     }
 
