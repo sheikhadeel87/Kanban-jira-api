@@ -1,6 +1,7 @@
 import express from 'express';
 import mongoose from 'mongoose';
 import cors from 'cors';
+import compression from 'compression';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -61,6 +62,9 @@ app.use(cors({
   preflightContinue: false,
   optionsSuccessStatus: 204
 }));
+
+// Enable gzip compression for all responses
+app.use(compression());
 
 // Body parsing middleware - must come before routes
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
@@ -274,3 +278,4 @@ if (process.env.NODE_ENV !== 'production') {
     console.log(`Server running on port ${PORT}`);
   });
 }
+

@@ -44,11 +44,11 @@ const taskSchema = new mongoose.Schema({
   timestamps: true,
 });
 
-// Index for faster queries
-taskSchema.index({ board: 1 });
-taskSchema.index({ assignedTo: 1 });
-taskSchema.index({ createdBy: 1 });
-// taskSchema.index({ status: 1 });
+// Indexes for faster queries
+taskSchema.index({ board: 1 }); // For fetching tasks by board
+taskSchema.index({ board: 1, createdAt: -1 }); // Compound index for board + sorting
+taskSchema.index({ assignedTo: 1 }); // For user's assigned tasks
+taskSchema.index({ createdBy: 1 }); // For tasks created by user
 
 const Task = mongoose.model('Task', taskSchema);
 export default Task;
