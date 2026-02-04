@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import Comment from '../models/comment.model.js';
 import Task from '../models/task.model.js';
 import User from '../models/user.model.js';
