@@ -460,7 +460,7 @@ export const sendOrganizationInvitation = async (toEmail, inviterName, organizat
       return { success: false, error: 'Invalid email address' };
     }
 
-    const frontendUrl = process.env.FRONTEND_URL || 'https://kanban-jira-client.vercel.app/dashboard';
+    const frontendUrl = process.env.FRONTEND_URL || 'https://kanban-jira-client.vercel.app';
     const registerUrl = `${frontendUrl}/register?inviteToken=${invitationToken}&email=${encodeURIComponent(toEmail)}`;
     const loginUrl = `${frontendUrl}/login?inviteToken=${invitationToken}&email=${encodeURIComponent(toEmail)}`;
 
